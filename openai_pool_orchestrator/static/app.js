@@ -1,9 +1,9 @@
-﻿/**
- * OpenAI Pool Orchestrator 鈥?鍓嶇浜や簰閫昏緫 v5.0
+/**
+ * OpenAI Pool Orchestrator 前端交互逻辑 v5.0
  */
 
 // ==========================================
-// 鐘舵€?
+// 状态
 // ==========================================
 const state = {
   status: 'idle',          // idle | running | stopping
@@ -11,7 +11,7 @@ const state = {
   failCount: 0,
   logCount: 0,
   autoScroll: true,
-  currentSteps: {},        // step鍚?鈫?鐘舵€?
+  currentSteps: {},        // step 当前状态
   eventSource: null,
   tokens: [],
   tokenSummary: {},
@@ -19,31 +19,31 @@ const state = {
     status: 'all',
     keyword: '',
   },
-  stepsInRun: false,       // 鏄惁澶勪簬涓€杞楠よ拷韪腑锛堥伩鍏嶅绾跨▼ start 浜掔浉娓呯┖锛?
+  stepsInRun: false,       // 是否处于本轮步骤追踪中（避免多线程 start 互相清空）
 };
 
 // ==========================================
-// DOM 寮曠敤
+// DOM 引用
 // ==========================================
 const $ = id => document.getElementById(id);
 const DOM = {};
 
 const STEPS = [
-  { id: 'check_proxy', label: '缃戠粶妫€鏌? },
-  { id: 'create_email', label: '鍒涘缓閭' },
-  { id: 'oauth_init', label: 'OAuth 鍒濆鍖? },
+  { id: 'check_proxy', label: '网络检测' },
+  { id: 'create_email', label: '创建邮箱' },
+  { id: 'oauth_init', label: 'OAuth 初始化' },
   { id: 'sentinel', label: 'Sentinel Token' },
-  { id: 'signup', label: '鎻愪氦娉ㄥ唽' },
-  { id: 'send_otp', label: '鍙戦€侀獙璇佺爜' },
-  { id: 'wait_otp', label: '绛夊緟楠岃瘉鐮? },
-  { id: 'verify_otp', label: '楠岃瘉 OTP' },
-  { id: 'create_account', label: '鍒涘缓璐︽埛' },
-  { id: 'workspace', label: '閫夋嫨 Workspace' },
-  { id: 'get_token', label: '鑾峰彇 Token' },
+  { id: 'signup', label: '提交注册' },
+  { id: 'send_otp', label: '发验证码' },
+  { id: 'wait_otp', label: '等待验证码' },
+  { id: 'verify_otp', label: '验证 OTP' },
+  { id: 'create_account', label: '创建账户' },
+  { id: 'workspace', label: '选择 Workspace' },
+  { id: 'get_token', label: '获取 Token' },
 ];
 
 // ==========================================
-// 鍒濆鍖?
+// 初始化
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
   Object.assign(DOM, {
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     stepsTracker: $('stepsTracker'),
     segmentIndicator: $('segmentIndicator'),
     autoScrollCheck: $('autoScrollCheck'),
-    // 澶氱嚎绋?
+    // 多线程
     multithreadCheck: $('multithreadCheck'),
     threadCountInput: $('threadCountInput'),
     // Sub2Api
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadModeStatus: $('uploadModeStatus'),
     saveSyncConfigBtn: $('saveSyncConfigBtn'),
     syncStatus: $('syncStatus'),
-    // Header 姹犵姸鎬?
+    // Header 池状态
     headerSub2apiChip: $('headerSub2apiChip'),
     headerSub2apiLabel: $('headerSub2apiLabel'),
     headerSub2apiDelta: $('headerSub2apiDelta'),
@@ -98,12 +98,12 @@ document.addEventListener('DOMContentLoaded', () => {
     cpaTestBtn: $('cpaTestBtn'),
     cpaSaveBtn: $('cpaSaveBtn'),
     cpaStatus: $('cpaStatus'),
-    // Mail config锛堝閫夛級
+    // Mail config（多选）
     mailStrategySelect: $('mailStrategySelect'),
     mailTestBtn: $('mailTestBtn'),
     mailSaveBtn: $('mailSaveBtn'),
     mailStatus: $('mailStatus'),
-    // Pool tab 鈥?CPA
+    // Pool tab ?CPA
     poolTotal: $('poolTotal'),
     poolCandidates: $('poolCandidates'),
     poolError: $('poolError'),
@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tokenFilterKeyword: $('tokenFilterKeyword'),
     tokenFilterApplyBtn: $('tokenFilterApplyBtn'),
     tokenFilterResetBtn: $('tokenFilterResetBtn'),
-    // Pool tab 鈥?Sub2Api
+    // Pool tab ?Sub2Api
     sub2apiPoolTotal: $('sub2apiPoolTotal'),
     sub2apiPoolNormal: $('sub2apiPoolNormal'),
     sub2apiPoolError: $('sub2apiPoolError'),
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     proxyPoolTestBtn: $('proxyPoolTestBtn'),
     proxyPoolSaveBtn: $('proxyPoolSaveBtn'),
     proxyPoolStatus: $('proxyPoolStatus'),
-    // 浠ｇ悊淇濆瓨 & 鑷姩娉ㄥ唽
+    // 代理保存 & 自动注册
     saveProxyBtn: $('saveProxyBtn'),
     autoRegisterCheck: $('autoRegisterCheck'),
     expectedTokenCountInput: $('expectedTokenCountInput'),
@@ -170,17 +170,17 @@ document.addEventListener('DOMContentLoaded', () => {
   pollSub2ApiPoolStatus();
   initThemeSwitch();
 
-  // 鎶樺彔闈㈡澘
+  // 折叠面板
   initCollapsibles();
 
-  // 鎺у埗涓績浜嬩欢
+  // 控制中心事件
   DOM.checkProxyBtn.addEventListener('click', checkProxy);
   if (DOM.saveProxyBtn) DOM.saveProxyBtn.addEventListener('click', saveProxy);
   DOM.btnStart.addEventListener('click', startTask);
   DOM.btnStop.addEventListener('click', stopTask);
   DOM.clearLogBtn.addEventListener('click', clearLog);
 
-  // 鏈嶅姟閰嶇疆浜嬩欢
+  // 服务配置事件
   DOM.saveSyncConfigBtn.addEventListener('click', saveSyncConfig);
   if (DOM.uploadModeSaveBtn) DOM.uploadModeSaveBtn.addEventListener('click', saveUploadMode);
   DOM.cpaTestBtn.addEventListener('click', testCpaConnection);
@@ -188,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.mailTestBtn.addEventListener('click', testMailConnection);
   DOM.mailSaveBtn.addEventListener('click', saveMailConfig);
 
-  // 璐﹀彿姹犱簨浠?鈥?CPA
+  // 账号池事件（CPA）
   DOM.poolRefreshBtn.addEventListener('click', pollPoolStatus);
   DOM.poolMaintainBtn.addEventListener('click', triggerMaintenance);
   if (DOM.poolCopyRtBtn) DOM.poolCopyRtBtn.addEventListener('click', copyAllRt);
@@ -200,7 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') applyTokenFilter();
     });
   }
-  // 璐﹀彿姹犱簨浠?鈥?Sub2Api
+  // 账号池事件（Sub2Api）
   if (DOM.sub2apiPoolRefreshBtn) DOM.sub2apiPoolRefreshBtn.addEventListener('click', pollSub2ApiPoolStatus);
   if (DOM.sub2apiPoolMaintainBtn) DOM.sub2apiPoolMaintainBtn.addEventListener('click', triggerSub2ApiMaintenance);
   if (DOM.sub2apiTestPoolBtn) DOM.sub2apiTestPoolBtn.addEventListener('click', testSub2ApiPoolConnection);
@@ -208,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (DOM.proxyPoolSaveBtn) DOM.proxyPoolSaveBtn.addEventListener('click', saveProxyPoolConfig);
   if (DOM.proxyPoolProvider) DOM.proxyPoolProvider.addEventListener('change', onProxyPoolProviderChange);
 
-  // Token 鍒楄〃浜嬩欢濮旀墭
+  // Token 列表事件委托
   if (DOM.poolTokenList) {
     DOM.poolTokenList.addEventListener('click', async (e) => {
       const copyBtn = e.target.closest('.token-copy-btn');
@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const payload = decodeURIComponent(copyBtn.dataset.payload || '');
           await copyToken(payload);
-        } catch { showToast('澶嶅埗澶辫触', 'error'); }
+        } catch { showToast('复制失败', 'error'); }
         return;
       }
       const deleteBtn = e.target.closest('.token-delete-btn');
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (DOM.autoScrollCheck) DOM.autoScrollCheck.checked = isAtBottom;
   });
 
-  // 鑷姩婊氬姩寮€鍏?
+  // 自动滚动开关
   if (DOM.autoScrollCheck) {
     DOM.autoScrollCheck.addEventListener('change', () => {
       state.autoScroll = DOM.autoScrollCheck.checked;
@@ -247,12 +247,12 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(pollPoolStatus, 30000);
   setInterval(pollSub2ApiPoolStatus, 30000);
 
-  // Tab 瀵艰埅
+  // Tab 导航
   initTabs();
 });
 
 // ==========================================
-// Tab 瀵艰埅鍒囨崲 鈥?iOS Segmented Control
+// Tab 导航切换（iOS Segmented Control）
 // ==========================================
 function initTabs() {
   const tabBtns = document.querySelectorAll('.tab-btn');
@@ -267,7 +267,7 @@ function initTabs() {
       btn.setAttribute('aria-selected', 'true');
       document.getElementById(btn.dataset.tab).classList.add('active');
 
-      // 婊戝姩鍒嗘鎸囩ず鍣?
+      // 滑动分段指示器
       if (indicator) {
         indicator.setAttribute('data-active', String(index));
       }
@@ -276,7 +276,7 @@ function initTabs() {
 }
 
 // ==========================================
-// 鎶樺彔闈㈡澘
+// 折叠面板
 // ==========================================
 function initCollapsibles() {
   document.querySelectorAll('.collapsible-trigger').forEach(trigger => {
@@ -301,7 +301,7 @@ function initCollapsibles() {
 }
 
 // ==========================================
-// SSE 鏃ュ織杩炴帴
+// SSE 日志连接
 // ==========================================
 function connectSSE() {
   if (state.eventSource) state.eventSource.close();
@@ -314,10 +314,10 @@ function connectSSE() {
 
     if (event.level === 'token_saved') {
       loadTokens();
-      showToast('鏂?Token 宸蹭繚瀛? ' + event.message, 'success');
+      showToast('新 Token 已保存: ' + event.message, 'success');
     }
     if (event.level === 'sync_ok') {
-      showToast('宸茶嚜鍔ㄥ悓姝? ' + event.message, 'success');
+      showToast('已自动同步: ' + event.message, 'success');
     }
     if (event.step === 'start' && !state.stepsInRun) {
       state.stepsInRun = true;
@@ -329,7 +329,7 @@ function connectSSE() {
       }
     }
     if (event.step === 'wait' && event.message) {
-      const match = event.message.match(/(\d+)\s*绉?);
+      const match = event.message.match(/(\d+)\s*?);
       if (match) startCountdown(parseInt(match[1]));
     }
     if (event.step) updateStep(event.step, event.level);
@@ -339,9 +339,9 @@ function connectSSE() {
 }
 
 // ==========================================
-// 鏃ュ織娓叉煋
+// 日志渲染
 // ==========================================
-const LEVEL_ICON = { info: '鈥?, success: '鉁?, error: '鉁?, warn: '鈿?, connected: '鉄? };
+const LEVEL_ICON = { info: 'i', success: '+', error: 'x', warn: '!', connected: '*' };
 
 function appendLog(event) {
   const { ts, level, message, step } = event;
@@ -350,7 +350,7 @@ function appendLog(event) {
   entry.className = 'log-entry';
   entry.innerHTML = `
     <span class="log-ts">${ts || ''}</span>
-    <span class="log-icon">${LEVEL_ICON[level] || '路'}</span>
+    <span class="log-icon">${LEVEL_ICON[level] || '·'}</span>
     <span class="log-msg ${level}">${escapeHtml(message)}</span>
     ${step && !['start', 'stopped', 'retry', 'wait', 'runtime'].includes(step)
       ? `<span class="log-step">${escapeHtml(step)}</span>` : ''}
@@ -369,13 +369,13 @@ function clearLog() {
 }
 
 // ==========================================
-// 浠ｇ悊妫€娴?
+// 代理检测
 // ==========================================
 async function checkProxy() {
   const proxy = DOM.proxyInput.value.trim();
-  if (!proxy) { showToast('璇峰厛濉啓浠ｇ悊鍦板潃', 'error'); return; }
+  if (!proxy) { showToast('请先填写代理地址', 'error'); return; }
   DOM.proxyStatus.className = 'proxy-status';
-  DOM.proxyStatus.innerHTML = '<span>妫€娴嬩腑...</span>';
+  DOM.proxyStatus.innerHTML = '<span>棢测中...</span>';
   DOM.checkProxyBtn.disabled = true;
   try {
     const res = await fetch('/api/check-proxy', {
@@ -386,21 +386,21 @@ async function checkProxy() {
     const data = await res.json();
     if (data.ok) {
       DOM.proxyStatus.className = 'proxy-status ok';
-      DOM.proxyStatus.innerHTML = `<span>鍙敤 路 鎵€鍦ㄥ湴: <b>${escapeHtml(data.loc || '')}</b></span>`;
+      DOM.proxyStatus.innerHTML = `<span>可用 · 扢在地: <b>${escapeHtml(data.loc || '')}</b></span>`;
     } else {
       DOM.proxyStatus.className = 'proxy-status fail';
-      DOM.proxyStatus.innerHTML = `<span>涓嶅彲鐢?路 ${escapeHtml(data.error || '')}</span>`;
+      DOM.proxyStatus.innerHTML = `<span>不可用 · ${escapeHtml(data.error || '')}</span>`;
     }
   } catch {
     DOM.proxyStatus.className = 'proxy-status fail';
-    DOM.proxyStatus.innerHTML = '<span>妫€娴嬭姹傚け璐?/span>';
+    DOM.proxyStatus.innerHTML = '<span>检测请求失败</span>';
   } finally {
     DOM.checkProxyBtn.disabled = false;
   }
 }
 
 // ==========================================
-// 浠ｇ悊淇濆瓨
+// 代理保存
 // ==========================================
 async function saveProxy() {
   const proxy = DOM.proxyInput.value.trim();
@@ -423,22 +423,22 @@ async function saveProxy() {
       }),
     });
     if (res.ok) {
-      showToast('浠ｇ悊閰嶇疆宸蹭繚瀛?, 'success');
+      showToast('代理配置已保存', 'success');
     } else {
-      showToast('淇濆瓨澶辫触', 'error');
+      showToast('保存失败', 'error');
     }
   } catch (e) {
-    showToast('淇濆瓨璇锋眰澶辫触: ' + e.message, 'error');
+    showToast('保存请求失败: ' + e.message, 'error');
   }
 }
 
 // ==========================================
-// 鍚姩 / 鍋滄浠诲姟
+// 启动 / 停止任务
 // ==========================================
 async function startTask() {
   const proxy = DOM.proxyInput.value.trim();
   const proxyPoolEnabled = DOM.proxyPoolEnabled ? DOM.proxyPoolEnabled.checked : false;
-  if (!proxy && !proxyPoolEnabled) { showToast('璇峰～鍐欎唬鐞嗗湴鍧€鎴栧惎鐢ㄤ唬鐞嗘睜', 'error'); return; }
+  if (!proxy && !proxyPoolEnabled) { showToast('请填写代理地坢或启用代理池', 'error'); return; }
   const multithread = DOM.multithreadCheck ? DOM.multithreadCheck.checked : false;
   const thread_count = DOM.threadCountInput ? parseInt(DOM.threadCountInput.value) || 3 : 1;
   try {
@@ -449,16 +449,16 @@ async function startTask() {
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.detail || '鍚姩澶辫触', 'error');
+      showToast(data.detail || '启动失败', 'error');
       return;
     }
     Object.keys(state.currentSteps).forEach(k => delete state.currentSteps[k]);
     renderSteps();
-    const workerMsg = multithread ? ` (${data.workers || thread_count} 绾跨▼)` : '';
-    showToast('娉ㄥ唽浠诲姟宸插惎鍔? + workerMsg, 'success');
+    const workerMsg = multithread ? ` (${data.workers || thread_count} 线程)` : '';
+    showToast('注册任务已启动' + workerMsg, 'success');
     updateStatus();
   } catch (e) {
-    showToast('鍚姩璇锋眰澶辫触: ' + e.message, 'error');
+    showToast('启动请求失败: ' + e.message, 'error');
   }
 }
 
@@ -467,18 +467,18 @@ async function stopTask() {
     const res = await fetch('/api/stop', { method: 'POST' });
     if (!res.ok) {
       const data = await res.json();
-      showToast(data.detail || '鍋滄澶辫触', 'error');
+      showToast(data.detail || '停止失败', 'error');
       return;
     }
-    showToast('姝ｅ湪鍋滄浠诲姟...', 'info');
+    showToast('正在停止任务...', 'info');
     updateStatus();
   } catch (e) {
-    showToast('鍋滄璇锋眰澶辫触: ' + e.message, 'error');
+    showToast('停止请求失败: ' + e.message, 'error');
   }
 }
 
 // ==========================================
-// 鐘舵€佹洿鏂?
+// 状态更新
 // ==========================================
 async function updateStatus() {
   try {
@@ -489,7 +489,7 @@ async function updateStatus() {
     state.failCount = data.fail;
 
     DOM.statusBadge.className = `status-badge ${data.status}`;
-    const labelMap = { idle: '绌洪棽', running: '杩愯涓?, stopping: '鍋滄涓? };
+    const labelMap = { idle: '空闲', running: '运行中', stopping: '停止中' };
     DOM.statusText.textContent = labelMap[data.status] || data.status;
 
     const isRunning = data.status === 'running';
@@ -502,7 +502,7 @@ async function updateStatus() {
     DOM.statFail.textContent = data.fail;
     DOM.statTotal.textContent = data.success + data.fail;
 
-    // 浠诲姟缁撴潫鍚庡厹搴曟竻鐞嗘楠ら珮浜紝閬垮厤鍑虹幇鈥滅姸鎬佸凡鍋滀絾姝ラ杩樺湪璺戔€濈殑瑙嗚娈嬬暀
+    // 任务结束后兜底清理步骤高亮，避免出现“状态已停但步骤还在跑的视觉残留
     if (data.status === 'idle') {
       state.stepsInRun = false;
       if (Object.keys(state.currentSteps).length > 0) {
@@ -518,7 +518,7 @@ async function updateStatus() {
 }
 
 // ==========================================
-// 姝ラ杩借釜
+// 步骤追踪
 // ==========================================
 function renderSteps() {
   DOM.stepsTracker.innerHTML = STEPS.map(s => {
@@ -548,12 +548,12 @@ function startCountdown(seconds) {
   state.countdownTimer = setInterval(() => {
     remaining--;
     if (remaining <= 0) { clearInterval(state.countdownTimer); state.countdownTimer = null; return; }
-    if (countdownMsgEl) countdownMsgEl.textContent = `浼戞伅涓?.. 鍓╀綑 ${remaining} 绉抈;
+    if (countdownMsgEl) countdownMsgEl.textContent = `休息中... 剩余 ${remaining} 秒`;
   }, 1000);
 }
 
 // ==========================================
-// Token 鍒楄〃
+// Token 列表
 // ==========================================
 async function loadTokens() {
   try {
@@ -607,13 +607,13 @@ function renderTokenList() {
   }
   if (DOM.poolRecentTokenTotal) {
     const total = Number((state.tokenSummary || {}).recent_total_tokens || 0);
-    DOM.poolRecentTokenTotal.textContent = `近期总Token: ${Number.isFinite(total) ? total : 0}`;
+    DOM.poolRecentTokenTotal.textContent = `Token: ${Number.isFinite(total) ? total : 0}`;
   }
 
   if (!DOM.poolTokenList) return;
   if (filteredTokens.length === 0) {
-    const msg = allTokens.length === 0 ? '鏆傛棤 Token' : '鏆傛棤绗﹀悎绛涢€夋潯浠剁殑 Token';
-    DOM.poolTokenList.innerHTML = `<div class="empty-state"><div class="empty-icon">馃攽</div><span>${msg}</span></div>`;
+    const msg = allTokens.length === 0 ? '暂无 Token' : '暂无符合筛条件的 Token';
+    DOM.poolTokenList.innerHTML = `<div class="empty-state"><div class="empty-icon">🔑</div><span>${msg}</span></div>`;
     return;
   }
   DOM.poolTokenList.innerHTML = filteredTokens.map(t => renderTokenItem(t)).join('');
@@ -638,7 +638,7 @@ function renderTokenItem(t) {
   const uploaded = platforms.length > 0;
   const platformBadges = platforms.length > 0
     ? platforms.map((p) => `<span class="platform-badge ${p}">${p === 'cpa' ? 'CPA' : 'Sub2Api'}</span>`).join('')
-    : '<span class="platform-badge none">鏈笂浼?/span>';
+    : '<span class="platform-badge none">未上传</span>';
   const expiredStr = formatTime(t.expired);
   const planType = String(t.plan_type || ((t.content || {}).plan_type) || 'unknown').toLowerCase();
   const quotaStr = formatRemainingQuota(t);
@@ -655,17 +655,17 @@ function renderTokenItem(t) {
         <div class="token-meta token-platforms">${platformBadges}</div>
         <div class="token-meta">Plan: ${escapeHtml(planType)}</div>
         <div class="token-meta">Quota: ${escapeHtml(quotaStr)} | Recent Tokens: ${escapeHtml(recentUsageStr)}</div>
-        <div class="token-meta">杩囨湡: ${expiredStr}</div>
+        <div class="token-meta">过期: ${expiredStr}</div>
       </div>
       <div class="token-actions">
-        <button class="btn btn-ghost btn-sm token-copy-btn" data-payload="${tokenPayload}">澶嶅埗</button>
-        <button class="btn btn-danger btn-sm token-delete-btn" data-filename="${filePayload}">鍒犻櫎</button>
+        <button class="btn btn-ghost btn-sm token-copy-btn" data-payload="${tokenPayload}">复制</button>
+        <button class="btn btn-danger btn-sm token-delete-btn" data-filename="${filePayload}">删除</button>
       </div>
     </div>`;
 }
 
 function formatTime(timeStr) {
-  if (!timeStr) return '鏈煡';
+  if (!timeStr) return '未知';
   try {
     const d = new Date(timeStr);
     if (isNaN(d.getTime())) return timeStr;
@@ -676,7 +676,7 @@ function formatTime(timeStr) {
 
 async function copyToken(jsonStr) {
   const ok = await copyText(jsonStr);
-  showToast(ok ? 'Token 宸插鍒跺埌鍓创鏉? : '澶嶅埗澶辫触', ok ? 'success' : 'error');
+  showToast(ok ? 'Token 已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
 }
 
 async function copyText(text) {
@@ -699,23 +699,23 @@ async function copyAllRt() {
   try {
     const visibleTokens = getFilteredTokens(state.tokens || []);
     const rts = visibleTokens.map(t => (t.content || {}).refresh_token || '').filter(Boolean);
-    if (rts.length === 0) { showToast('娌℃湁鍙敤鐨?Refresh Token', 'error'); return; }
+    if (rts.length === 0) { showToast('没有可用的 Refresh Token', 'error'); return; }
     const ok = await copyText(rts.join('\n'));
-    showToast(ok ? `宸插鍒?${rts.length} 涓?RT锛堝綋鍓嶇瓫閫夛級` : '澶嶅埗澶辫触', ok ? 'success' : 'error');
-  } catch (e) { showToast('澶嶅埗澶辫触: ' + e.message, 'error'); }
+    showToast(ok ? `已复制 ${rts.length} 个 RT（当前筛选）` : '复制失败', ok ? 'success' : 'error');
+  } catch (e) { showToast('复制失败: ' + e.message, 'error'); }
 }
 
 async function deleteToken(filename) {
-  if (!confirm(`纭鍒犻櫎 ${filename}锛焋)) return;
+  if (!confirm(`确认删除 ${filename}？`)) return;
   try {
     const res = await fetch(`/api/tokens/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-    if (res.ok) { showToast('宸插垹闄?, 'info'); loadTokens(); }
-    else showToast('鍒犻櫎澶辫触', 'error');
-  } catch { showToast('鍒犻櫎璇锋眰澶辫触', 'error'); }
+    if (res.ok) { showToast('已删除', 'info'); loadTokens(); }
+    else showToast('删除失败', 'error');
+  } catch { showToast('删除请求失败', 'error'); }
 }
 
 // ==========================================
-// Sub2Api 鍚屾閰嶇疆
+// Sub2Api 同步配置
 // ==========================================
 async function loadSyncConfig() {
   if (DOM.syncStatus) DOM.syncStatus.textContent = '';
@@ -777,14 +777,14 @@ function applyProxyPoolProviderUI(provider, setDefaultUrl = false) {
   const defaultUrl = PROXY_POOL_PROVIDER_DEFAULTS[normalized] || PROXY_POOL_PROVIDER_DEFAULTS.zenproxy_api;
 
   if (DOM.proxyPoolProvider) DOM.proxyPoolProvider.value = normalized;
-  if (DOM.proxyPoolApiUrlLabel) DOM.proxyPoolApiUrlLabel.textContent = zenMode ? 'Fetch API URL' : 'Proxy URL';
+  if (DOM.proxyPoolApiUrlLabel) DOM.proxyPoolApiUrlLabel.textContent = zenMode ? '抓取 API 地址' : '代理 URL';
   if (DOM.proxyPoolZenAuthRow) DOM.proxyPoolZenAuthRow.style.display = zenMode ? '' : 'none';
   if (DOM.proxyPoolZenFilterRow) DOM.proxyPoolZenFilterRow.style.display = zenMode ? '' : 'none';
   if (DOM.proxyPoolAuthMode) DOM.proxyPoolAuthMode.disabled = !zenMode;
   if (DOM.proxyPoolApiKey) {
     DOM.proxyPoolApiKey.disabled = !zenMode;
     if (zenMode) {
-      DOM.proxyPoolApiKey.placeholder = '请输入代理池 API Key';
+      DOM.proxyPoolApiKey.placeholder = ' API Key';
     } else {
       DOM.proxyPoolApiKey.placeholder = 'Not required for this provider';
     }
@@ -835,8 +835,8 @@ async function loadProxyPoolConfig() {
       DOM.proxyPoolApiKey.value = '';
       if (isZenProxyProvider(provider)) {
         DOM.proxyPoolApiKey.placeholder = cfg.proxy_pool_api_key_preview
-          ? `已保存: ${cfg.proxy_pool_api_key_preview}`
-          : '请输入代理池 API Key';
+          ? `ѱ: ${cfg.proxy_pool_api_key_preview}`
+          : ' API Key';
       }
     }
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '';
@@ -848,7 +848,7 @@ async function saveProxyPoolConfig() {
   const payload = buildProxyPoolPayload();
   const zenMode = isZenProxyProvider(payload.proxy_pool_provider);
   if (!payload.proxy_pool_api_url) {
-    showToast(zenMode ? '请填写代理池 API 地址' : '请填写固定代理地址', 'error');
+    showToast(zenMode ? 'д API ַ' : 'д̶ַ', 'error');
     return;
   }
   if (payload.proxy_pool_count < 1) payload.proxy_pool_count = 1;
@@ -856,8 +856,8 @@ async function saveProxyPoolConfig() {
 
   DOM.proxyPoolSaveBtn.disabled = true;
   const oldText = DOM.proxyPoolSaveBtn.textContent;
-  DOM.proxyPoolSaveBtn.textContent = '保存中...';
-  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '正在保存代理池配置...';
+  DOM.proxyPoolSaveBtn.textContent = '...';
+  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = 'ڱ...';
   try {
     const res = await fetch('/api/proxy-pool/config', {
       method: 'POST',
@@ -866,25 +866,25 @@ async function saveProxyPoolConfig() {
     });
     const data = await res.json();
     if (!res.ok) {
-      const msg = data.detail || '保存失败';
+      const msg = data.detail || 'ʧ';
       if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
       showToast(msg, 'error');
       return;
     }
     if (DOM.proxyPoolApiKey && payload.proxy_pool_api_key && zenMode) {
       DOM.proxyPoolApiKey.value = '';
-      DOM.proxyPoolApiKey.placeholder = `已保存: ${payload.proxy_pool_api_key.slice(0, 8)}...`;
+      DOM.proxyPoolApiKey.placeholder = `ѱ: ${payload.proxy_pool_api_key.slice(0, 8)}...`;
     }
-    const msg = '代理池配置已保存';
+    const msg = 'ѱ';
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
     showToast(msg, 'success');
   } catch (e) {
-    const msg = '请求失败: ' + e.message;
+    const msg = 'ʧ: ' + e.message;
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
     showToast(msg, 'error');
   } finally {
     DOM.proxyPoolSaveBtn.disabled = false;
-    DOM.proxyPoolSaveBtn.textContent = oldText || '保存代理池配置';
+    DOM.proxyPoolSaveBtn.textContent = oldText || '';
   }
 }
 
@@ -904,12 +904,12 @@ async function saveSyncConfig() {
   const local_auto_maintain = DOM.localAutoMaintainCheck ? DOM.localAutoMaintainCheck.checked : false;
   const local_maintain_interval_minutes = DOM.localMaintainIntervalInput ? (parseInt(DOM.localMaintainIntervalInput.value) || 30) : 30;
 
-  if (!base_url) { showToast('璇峰～鍐欏钩鍙板湴鍧€', 'error'); return; }
-  if (!email) { showToast('璇峰～鍐欓偖绠?, 'error'); return; }
+  if (!base_url) { showToast('请填写平台地坢', 'error'); return; }
+  if (!email) { showToast('请填写邮箱', 'error'); return; }
 
   DOM.saveSyncConfigBtn.disabled = true;
-  DOM.saveSyncConfigBtn.textContent = '楠岃瘉涓?..';
-  DOM.syncStatus.textContent = '姝ｅ湪楠岃瘉璐﹀彿瀵嗙爜...';
+  DOM.saveSyncConfigBtn.textContent = '验证中...';
+  DOM.syncStatus.textContent = '正在验证账号密码...';
   try {
     const res = await fetch('/api/sync-config', {
       method: 'POST',
@@ -924,19 +924,19 @@ async function saveSyncConfig() {
     });
     const data = await res.json();
     if (res.ok) {
-      showToast('楠岃瘉閫氳繃锛岄厤缃凡淇濆瓨', 'success');
-      DOM.syncStatus.textContent = '楠岃瘉閫氳繃锛岄厤缃凡淇濆瓨';
+      showToast('验证通过，配置已保存', 'success');
+      DOM.syncStatus.textContent = '验证通过，配置已保存';
       pollSub2ApiPoolStatus();
     } else {
-      showToast(data.detail || '楠岃瘉澶辫触', 'error');
-      DOM.syncStatus.textContent = data.detail || '楠岃瘉澶辫触';
+      showToast(data.detail || '验证失败', 'error');
+      DOM.syncStatus.textContent = data.detail || '验证失败';
     }
   } catch (e) {
-    showToast('璇锋眰澶辫触: ' + e.message, 'error');
-    DOM.syncStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    showToast('请求失败: ' + e.message, 'error');
+    DOM.syncStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.saveSyncConfigBtn.disabled = false;
-    DOM.saveSyncConfigBtn.textContent = '淇濆瓨';
+    DOM.saveSyncConfigBtn.textContent = '保存';
   }
 }
 
@@ -945,8 +945,8 @@ async function saveUploadMode() {
   if (!DOM.uploadModeSaveBtn) return;
   DOM.uploadModeSaveBtn.disabled = true;
   const oldText = DOM.uploadModeSaveBtn.textContent;
-  DOM.uploadModeSaveBtn.textContent = '淇濆瓨涓?..';
-  if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '姝ｅ湪淇濆瓨绛栫暐...';
+  DOM.uploadModeSaveBtn.textContent = '保存中...';
+  if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '正在保存策略...';
   try {
     const res = await fetch('/api/upload-mode', {
       method: 'POST',
@@ -955,20 +955,20 @@ async function saveUploadMode() {
     });
     const data = await res.json();
     if (!res.ok) {
-      const msg = data.detail || '淇濆瓨澶辫触';
+      const msg = data.detail || '保存失败';
       showToast(msg, 'error');
       if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = msg;
       return;
     }
-    const label = upload_mode === 'decoupled' ? '鍙屽钩鍙板悓浼狅紙鍗曡处鍙峰弻涓婁紶锛? : '涓茶琛ュ钩鍙帮紙鍏圕PA鍚嶴ub2Api锛?;
-    showToast('涓婁紶绛栫暐宸蹭繚瀛橈細' + label, 'success');
-    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '宸蹭繚瀛橈細' + label;
+    const label = upload_mode === 'decoupled' ? '双平台同传（单账号双上传）' : '串行补平台（先 CPA 后 Sub2Api）';
+    showToast('上传策略已保存：' + label, 'success');
+    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '已保存：' + label;
   } catch (e) {
-    showToast('璇锋眰澶辫触: ' + e.message, 'error');
-    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    showToast('请求失败: ' + e.message, 'error');
+    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.uploadModeSaveBtn.disabled = false;
-    DOM.uploadModeSaveBtn.textContent = oldText || '淇濆瓨绛栫暐';
+    DOM.uploadModeSaveBtn.textContent = oldText || '保存策略';
   }
 }
 
@@ -976,8 +976,8 @@ async function batchSync() {
   const btn = DOM.poolPwSyncBtn;
   if (!btn) return;
   btn.disabled = true;
-  btn.textContent = '瀵煎叆涓?..';
-  showToast('鎵归噺瀵煎叆寮€濮?, 'info');
+  btn.textContent = '导入中...';
+  showToast('批量导入已开始', 'info');
   try {
     const res = await fetch('/api/sync-batch', {
       method: 'POST',
@@ -985,19 +985,19 @@ async function batchSync() {
       body: JSON.stringify({ filenames: [] }),
     });
     const data = await res.json();
-    if (!res.ok) { showToast(data.detail || '瀵煎叆澶辫触', 'error'); return; }
-    const msg = `瀵煎叆瀹屾垚锛氬叡 ${data.total}锛屾垚鍔?${data.ok}锛屽け璐?${data.fail}`;
+    if (!res.ok) { showToast(data.detail || '导入失败', 'error'); return; }
+    const msg = `导入完成：共 ${data.total}，成功 ${data.ok}，失败 ${data.fail}`;
     showToast(msg, data.fail > 0 ? 'info' : 'success');
   } catch (e) {
-    showToast('瀵煎叆澶辫触: ' + e.message, 'error');
+    showToast('导入失败: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = '鎵归噺瀵煎叆';
+    btn.textContent = '批量导入';
   }
 }
 
 // ==========================================
-// CPA 閰嶇疆
+// CPA 配置
 // ==========================================
 async function loadPoolConfig() {
   try {
@@ -1029,17 +1029,17 @@ async function savePoolConfig() {
       body: JSON.stringify(payload),
     });
     if (res.ok) {
-      showToast('CPA 閰嶇疆宸蹭繚瀛?, 'success');
-      DOM.cpaStatus.textContent = '閰嶇疆宸蹭繚瀛?;
+      showToast('CPA 配置已保存', 'success');
+      DOM.cpaStatus.textContent = '配置已保存';
       pollPoolStatus();
     } else {
       const data = await res.json();
-      showToast(data.detail || '淇濆瓨澶辫触', 'error');
-      DOM.cpaStatus.textContent = data.detail || '淇濆瓨澶辫触';
+      showToast(data.detail || '保存失败', 'error');
+      DOM.cpaStatus.textContent = data.detail || '保存失败';
     }
   } catch (e) {
-    showToast('璇锋眰澶辫触: ' + e.message, 'error');
-    DOM.cpaStatus.textContent = '璇锋眰澶辫触';
+    showToast('请求失败: ' + e.message, 'error');
+    DOM.cpaStatus.textContent = '请求失败';
   } finally {
     DOM.cpaSaveBtn.disabled = false;
   }
@@ -1047,26 +1047,26 @@ async function savePoolConfig() {
 
 async function testCpaConnection() {
   DOM.cpaTestBtn.disabled = true;
-  DOM.cpaStatus.textContent = '娴嬭瘯涓?..';
+  DOM.cpaStatus.textContent = '测试中...';
   try {
     const res = await fetch('/api/pool/check', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
-      DOM.cpaStatus.textContent = data.message || '杩炴帴鎴愬姛';
-      showToast('CPA 杩炴帴鎴愬姛', 'success');
+      DOM.cpaStatus.textContent = data.message || '连接成功';
+      showToast('CPA 连接成功', 'success');
     } else {
-      DOM.cpaStatus.textContent = data.message || data.detail || '杩炴帴澶辫触';
-      showToast('CPA 杩炴帴澶辫触', 'error');
+      DOM.cpaStatus.textContent = data.message || data.detail || '连接失败';
+      showToast('CPA 连接失败', 'error');
     }
   } catch (e) {
-    DOM.cpaStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    DOM.cpaStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.cpaTestBtn.disabled = false;
   }
 }
 
 // ==========================================
-// 姹犵姸鎬佽疆璇?
+// 池状态轮询
 // ==========================================
 async function pollPoolStatus() {
   try {
@@ -1106,31 +1106,31 @@ async function pollPoolStatus() {
 
 async function triggerMaintenance() {
   DOM.poolMaintainBtn.disabled = true;
-  DOM.poolMaintainBtn.textContent = '缁存姢涓?..';
-  DOM.poolMaintainStatus.textContent = '姝ｅ湪鎺㈡祴骞舵竻鐞嗘棤鏁堣处鍙?..';
+  DOM.poolMaintainBtn.textContent = '维护中...';
+  DOM.poolMaintainStatus.textContent = '正在探测并清理无效账号...';
   try {
     const res = await fetch('/api/pool/maintain', { method: 'POST' });
     const data = await res.json();
     if (res.ok) {
-      const msg = `缁存姢瀹屾垚: 鏃犳晥 ${data.invalid_count || 0}, 宸插垹闄?${data.deleted_ok || 0}, 澶辫触 ${data.deleted_fail || 0}`;
+      const msg = `维护完成: 无效 ${data.invalid_count || 0}, 已删除 ${data.deleted_ok || 0}, 失败 ${data.deleted_fail || 0}`;
       DOM.poolMaintainStatus.textContent = msg;
       showToast(msg, 'success');
       pollPoolStatus();
     } else {
-      DOM.poolMaintainStatus.textContent = data.detail || '缁存姢澶辫触';
-      showToast(data.detail || '缁存姢澶辫触', 'error');
+      DOM.poolMaintainStatus.textContent = data.detail || '维护失败';
+      showToast(data.detail || '维护失败', 'error');
     }
   } catch (e) {
-    DOM.poolMaintainStatus.textContent = '璇锋眰澶辫触: ' + e.message;
-    showToast('缁存姢璇锋眰澶辫触', 'error');
+    DOM.poolMaintainStatus.textContent = '请求失败: ' + e.message;
+    showToast('维护请求失败', 'error');
   } finally {
     DOM.poolMaintainBtn.disabled = false;
-    DOM.poolMaintainBtn.textContent = '缁存姢';
+    DOM.poolMaintainBtn.textContent = '维护';
   }
 }
 
 // ==========================================
-// Sub2Api 姹犵姸鎬佽疆璇?
+// Sub2Api 池状态轮询
 // ==========================================
 async function pollSub2ApiPoolStatus() {
   try {
@@ -1138,7 +1138,7 @@ async function pollSub2ApiPoolStatus() {
     const data = await res.json();
 
     if (data.configured && data.error) {
-      if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = 'Sub2Api 鐘舵€佽幏鍙栧け璐? ' + data.error;
+      if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = 'Sub2Api 状态获取失败: ' + data.error;
       updateHeaderSub2Api(null);
       return;
     }
@@ -1157,9 +1157,9 @@ async function pollSub2ApiPoolStatus() {
     const error = data.error_count || 0;
     const total = data.total || 0;
     const threshold = data.threshold || 0;
-    // 鍏呰冻鐜? 姝ｅ父璐﹀彿 / 鐩爣闃堝€?
+    // 充足率 = 正常账号 / 目标阈值
     const fillPct = threshold > 0 ? Math.round(normal / threshold * 100) : 100;
-    // 鍋ュ悍鐜? 姝ｅ父璐﹀彿 / 鎬昏处鍙?(鏃犲紓甯稿氨鏄?100%)
+    // 健康度 = 正常账号 / 总账号（无异常时为 100%）
     const healthPct = total > 0 ? Math.round(normal / total * 100) : 100;
 
     if (DOM.sub2apiPoolTotal) DOM.sub2apiPoolTotal.textContent = total;
@@ -1239,26 +1239,26 @@ function _headerPoolDelta(fillPct) {
 
 async function triggerSub2ApiMaintenance() {
   DOM.sub2apiPoolMaintainBtn.disabled = true;
-  DOM.sub2apiPoolMaintainBtn.textContent = '缁存姢涓?..';
-  DOM.sub2apiPoolMaintainStatus.textContent = '姝ｅ湪鍒锋柊寮傚父璐﹀彿骞舵竻鐞?..';
+  DOM.sub2apiPoolMaintainBtn.textContent = '维护中...';
+  DOM.sub2apiPoolMaintainStatus.textContent = '正在刷新异常账号并清理...';
   try {
     const res = await fetch('/api/sub2api/pool/maintain', { method: 'POST' });
     const data = await res.json();
     if (res.ok) {
-      const msg = `缁存姢瀹屾垚: 寮傚父 ${data.error_count || 0}, 鍒锋柊 ${data.refreshed || 0}, 鍒犻櫎 ${data.deleted_ok || 0}, 澶辫触 ${data.deleted_fail || 0}`;
+      const msg = `维护完成: 异常 ${data.error_count || 0}, 刷新 ${data.refreshed || 0}, 删除 ${data.deleted_ok || 0}, 失败 ${data.deleted_fail || 0}`;
       DOM.sub2apiPoolMaintainStatus.textContent = msg;
       showToast(msg, 'success');
       pollSub2ApiPoolStatus();
     } else {
-      DOM.sub2apiPoolMaintainStatus.textContent = data.detail || '缁存姢澶辫触';
-      showToast(data.detail || '缁存姢澶辫触', 'error');
+      DOM.sub2apiPoolMaintainStatus.textContent = data.detail || '维护失败';
+      showToast(data.detail || '维护失败', 'error');
     }
   } catch (e) {
-    DOM.sub2apiPoolMaintainStatus.textContent = '璇锋眰澶辫触: ' + e.message;
-    showToast('Sub2Api 缁存姢璇锋眰澶辫触', 'error');
+    DOM.sub2apiPoolMaintainStatus.textContent = '请求失败: ' + e.message;
+    showToast('Sub2Api 维护请求失败', 'error');
   } finally {
     DOM.sub2apiPoolMaintainBtn.disabled = false;
-    DOM.sub2apiPoolMaintainBtn.textContent = '缁存姢';
+    DOM.sub2apiPoolMaintainBtn.textContent = '维护';
   }
 }
 
@@ -1266,8 +1266,8 @@ async function testProxyPoolFetch() {
   if (!DOM.proxyPoolTestBtn) return;
   DOM.proxyPoolTestBtn.disabled = true;
   const oldText = DOM.proxyPoolTestBtn.textContent;
-  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '正在测试代理池连接...';
-  DOM.proxyPoolTestBtn.textContent = '测试中...';
+  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = 'ڲԴ...';
+  DOM.proxyPoolTestBtn.textContent = '...';
   try {
     const payloadRaw = buildProxyPoolPayload();
     const payload = {
@@ -1286,7 +1286,7 @@ async function testProxyPoolFetch() {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      const msg = data.error || data.detail || '代理池测试失败';
+      const msg = data.error || data.detail || 'زʧ';
       if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
       showToast(msg, 'error');
       return;
@@ -1294,44 +1294,44 @@ async function testProxyPoolFetch() {
     const locText = data.loc ? ` loc=${data.loc}` : '';
     const supportText = data.supported === null || data.supported === undefined
       ? ''
-      : (data.supported ? ' 可用' : ' 不可用(CN/HK)');
-    const traceWarn = data.trace_error ? ` (trace失败: ${data.trace_error})` : '';
-    const msg = `测试成功: ${data.proxy}${locText}${supportText}${traceWarn}`;
+      : (data.supported ? ' ' : ' (CN/HK)');
+    const traceWarn = data.trace_error ? ` (traceʧ: ${data.trace_error})` : '';
+    const msg = `Գɹ: ${data.proxy}${locText}${supportText}${traceWarn}`;
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-    showToast('代理池测试成功', 'success');
+    showToast('زԳɹ', 'success');
   } catch (e) {
-    const msg = '测试请求失败: ' + e.message;
+    const msg = 'ʧ: ' + e.message;
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
     showToast(msg, 'error');
   } finally {
     DOM.proxyPoolTestBtn.disabled = false;
     if (DOM.syncStatus) DOM.syncStatus.textContent = '';
-    DOM.proxyPoolTestBtn.textContent = oldText || '测试代理池取号';
+    DOM.proxyPoolTestBtn.textContent = oldText || 'Դȡ';
   }
 }
 
 async function testSub2ApiPoolConnection() {
   DOM.sub2apiTestPoolBtn.disabled = true;
-  DOM.syncStatus.textContent = '娴嬭瘯杩炴帴涓?..';
+  DOM.syncStatus.textContent = '测试连接中...';
   try {
     const res = await fetch('/api/sub2api/pool/check', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
-      DOM.syncStatus.textContent = data.message || '杩炴帴鎴愬姛';
-      showToast('Sub2Api 姹犺繛鎺ユ垚鍔?, 'success');
+      DOM.syncStatus.textContent = data.message || '连接成功';
+      showToast('Sub2Api 池连接成功', 'success');
     } else {
-      DOM.syncStatus.textContent = data.message || data.detail || '杩炴帴澶辫触';
-      showToast('Sub2Api 姹犺繛鎺ュけ璐?, 'error');
+      DOM.syncStatus.textContent = data.message || data.detail || '连接失败';
+      showToast('Sub2Api 池连接失败', 'error');
     }
   } catch (e) {
-    DOM.syncStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    DOM.syncStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.sub2apiTestPoolBtn.disabled = false;
   }
 }
 
 // ==========================================
-// 閭閰嶇疆锛堝閫夛級
+// 邮箱配置（多选）
 // ==========================================
 
 function initMailCheckboxes() {
@@ -1354,7 +1354,7 @@ async function loadMailConfig() {
     const configs = data.mail_provider_configs || {};
     const strategy = data.mail_strategy || 'round_robin';
 
-    // 璁剧疆 checkboxes
+    // 设置 checkboxes
     document.querySelectorAll('.mail-provider-check').forEach(cb => {
       const name = cb.value;
       cb.checked = providers.includes(name);
@@ -1362,7 +1362,7 @@ async function loadMailConfig() {
       const configDiv = item.querySelector('.provider-config');
       if (configDiv) configDiv.style.display = cb.checked ? 'block' : 'none';
 
-      // 濉厖 per-provider 閰嶇疆
+      // 填充 per-provider 配置
       const pcfg = configs[name] || {};
       item.querySelectorAll('[data-key]').forEach(input => {
         const key = input.dataset.key;
@@ -1375,7 +1375,7 @@ async function loadMailConfig() {
       });
     });
 
-    // 鍏煎鏃ф牸寮?
+    // 兼容旧格式
     if (!data.mail_providers && data.mail_config) {
       const mc = data.mail_config;
       const activeProvider = data.mail_provider || 'mailtm';
@@ -1409,7 +1409,7 @@ async function saveMailConfig() {
   });
 
   if (checkedProviders.length === 0) {
-    showToast('璇疯嚦灏戦€夋嫨涓€涓偖绠辨彁渚涘晢', 'error');
+    showToast('请至少择丢个邮箱提供商', 'error');
     return;
   }
 
@@ -1428,14 +1428,14 @@ async function saveMailConfig() {
       }),
     });
     if (res.ok) {
-      showToast('閭閰嶇疆宸蹭繚瀛?, 'success');
-      DOM.mailStatus.textContent = '閰嶇疆宸蹭繚瀛?;
+      showToast('邮箱配置已保存', 'success');
+      DOM.mailStatus.textContent = '配置已保存';
     } else {
       const data = await res.json();
-      DOM.mailStatus.textContent = data.detail || '淇濆瓨澶辫触';
+      DOM.mailStatus.textContent = data.detail || '保存失败';
     }
   } catch (e) {
-    DOM.mailStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    DOM.mailStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.mailSaveBtn.disabled = false;
   }
@@ -1443,7 +1443,7 @@ async function saveMailConfig() {
 
 async function testMailConnection() {
   DOM.mailTestBtn.disabled = true;
-  DOM.mailStatus.textContent = '娴嬭瘯涓?..';
+  DOM.mailStatus.textContent = '测试中...';
   try {
     await saveMailConfig();
     const res = await fetch('/api/mail/test', { method: 'POST' });
@@ -1452,18 +1452,18 @@ async function testMailConnection() {
       const msgs = data.results.map(r => `${r.provider}: ${r.ok ? 'OK' : r.message}`);
       DOM.mailStatus.textContent = msgs.join(' | ');
     } else {
-      DOM.mailStatus.textContent = data.message || (data.ok ? '杩炴帴鎴愬姛' : '杩炴帴澶辫触');
+      DOM.mailStatus.textContent = data.message || (data.ok ? '连接成功' : '连接失败');
     }
-    showToast(data.ok ? '閭娴嬭瘯閫氳繃' : '閭娴嬭瘯澶辫触', data.ok ? 'success' : 'error');
+    showToast(data.ok ? '邮箱测试通过' : '邮箱测试失败', data.ok ? 'success' : 'error');
   } catch (e) {
-    DOM.mailStatus.textContent = '璇锋眰澶辫触: ' + e.message;
+    DOM.mailStatus.textContent = '请求失败: ' + e.message;
   } finally {
     DOM.mailTestBtn.disabled = false;
   }
 }
 
 // ==========================================
-// Toast 閫氱煡 鈥?甯﹀浘鏍囧拰閫€鍑哄姩鐢?
+// Toast 通知（带图标和淡出动画）
 // ==========================================
 const TOAST_ICONS = {
   success: '&#10003;',
@@ -1524,7 +1524,7 @@ function showToast(msg, type = 'info') {
 }
 
 // ==========================================
-// 宸ュ叿鍑芥暟
+// 工具函数
 // ==========================================
 function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -1535,7 +1535,7 @@ function cssEscape(str) {
 }
 
 // ==========================================
-// 鎷栨嫿璋冩暣鏍忓搴?+ localStorage 鎸佷箙鍖?
+// 拖拽调整栏宽（localStorage 持久化）
 // ==========================================
 (function initResizable() {
   const STORAGE_KEY = 'oai_registrar_layout_v3';

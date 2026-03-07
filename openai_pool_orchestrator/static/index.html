@@ -1,17 +1,17 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpenAI Pool Orchestrator</title>
-  <meta name="description" content="OpenAI 璐﹀彿姹犵紪鎺掑櫒 鈥?Web 鍙鍖栫晫闈? />
+  <meta name="description" content="OpenAI 账号池编排器 · Web 可视化界面" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 
 <body>
 
-  <!-- ========== 澶撮儴 ========== -->
+  <!-- ========== 头部 ========== -->
   <header>
     <div class="header-brand">
       <div class="logo">
@@ -21,7 +21,7 @@
       <span class="version">v5.0</span>
     </div>
     <div class="header-right">
-      <div id="headerSub2apiChip" class="pool-chip status-idle" title="Sub2Api 姹犵姸鎬?>
+      <div id="headerSub2apiChip" class="pool-chip status-idle" title="Sub2Api 池状态">
         <span class="pool-chip-name">Sub2Api</span>
         <span id="headerSub2apiLabel" class="pool-chip-value">-- / --</span>
         <span id="headerSub2apiDelta" class="pool-chip-delta">--</span>
@@ -29,7 +29,7 @@
           <div id="headerSub2apiBar" class="pool-chip-fill" style="width:0%"></div>
         </div>
       </div>
-      <div id="headerCpaChip" class="pool-chip status-idle" title="CPA 姹犵姸鎬?>
+      <div id="headerCpaChip" class="pool-chip status-idle" title="CPA 池状态">
         <span class="pool-chip-name">CPA</span>
         <span id="headerCpaLabel" class="pool-chip-value">-- / --</span>
         <span id="headerCpaDelta" class="pool-chip-delta">--</span>
@@ -39,72 +39,72 @@
       </div>
       <div id="statusBadge" class="status-badge idle">
         <span id="statusDot" class="status-dot"></span>
-        <span id="statusText">绌洪棽</span>
+        <span id="statusText">空闲</span>
       </div>
-      <button id="themeToggleBtn" class="theme-toggle-btn" type="button" aria-label="鍒囨崲鍒版槑浜富棰? title="鍒囨崲鍒版槑浜富棰?>
+      <button id="themeToggleBtn" class="theme-toggle-btn" type="button" aria-label="切换到明亮主题" title="切换到明亮主题">
         <span class="theme-toggle-icon" aria-hidden="true"></span>
-        <span class="theme-toggle-label">榛戞殫</span>
+        <span class="theme-toggle-label">黑暗</span>
       </button>
     </div>
   </header>
 
-  <!-- ========== 杩涘害鏉?========== -->
+  <!-- ========== 进度条 ========== -->
   <div class="progress-bar">
     <div id="progressFill" class="progress-fill"></div>
   </div>
 
-  <!-- ========== Tab 瀵艰埅 鈥?iOS Segmented Control ========== -->
+  <!-- ========== Tab 导航（iOS Segmented Control） ========== -->
   <nav class="tab-nav" role="tablist">
     <div class="segmented-control">
       <div class="segment-indicator" id="segmentIndicator"></div>
       <button class="tab-btn active" data-tab="tabDashboard" role="tab" aria-selected="true" aria-controls="tabDashboard">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        <span>浠〃鐩?/span>
+        <span>仪表盘</span>
       </button>
       <button class="tab-btn" data-tab="tabConfig" role="tab" aria-selected="false" aria-controls="tabConfig">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        <span>閰嶇疆涓績</span>
+        <span>配置中心</span>
       </button>
     </div>
   </nav>
 
-  <!-- ========== 浠〃鐩?Tab ========== -->
+  <!-- ========== 仪表盘 Tab ========== -->
   <div id="tabDashboard" class="tab-panel active" role="tabpanel">
 
     <div class="app-shell">
 
-      <!-- ===== 宸︽爮锛氭帶鍒堕潰鏉?===== -->
+      <!-- ===== 左栏：控制面板 ===== -->
       <aside class="sidebar">
 
-        <!-- 浠ｇ悊閰嶇疆 -->
+        <!-- 代理配置 -->
         <div class="panel-section">
-          <div class="section-title">浠ｇ悊閰嶇疆</div>
+          <div class="section-title">代理配置</div>
           <div class="proxy-row">
             <div class="input-wrapper">
               <input type="text" id="proxyInput" placeholder="http://127.0.0.1:7897" value="http://127.0.0.1:7897"
                 autocomplete="off" spellcheck="false" />
             </div>
-            <button id="checkProxyBtn" class="btn btn-ghost btn-sm">妫€娴?/button>
-            <button id="saveProxyBtn" class="btn btn-ghost btn-sm">淇濆瓨</button>
+            <button id="checkProxyBtn" class="btn btn-ghost btn-sm">检测</button>
+            <button id="saveProxyBtn" class="btn btn-ghost btn-sm">保存</button>
           </div>
           <div id="proxyStatus" class="proxy-status">
-            <span>鐐瑰嚮銆屾娴嬨€嶉獙璇佷唬鐞嗗彲鐢ㄦ€?/span>
+            <span>点击“检测”验证代理可用性</span>
           </div>
         </div>
 
-        <!-- 浠诲姟鎺у埗 -->
+        <!-- 任务控制 -->
         <div class="panel-section">
-          <div class="section-title">浠诲姟鎺у埗</div>
+          <div class="section-title">任务控制</div>
           <div class="toggle-row">
             <label class="ios-toggle-label" for="multithreadCheck">
               <span class="ios-toggle">
                 <input type="checkbox" id="multithreadCheck" />
                 <span class="toggle-track"></span>
               </span>
-              <span>澶氱嚎绋?/span>
+              <span>多线程</span>
             </label>
             <div class="thread-count-wrap">
-              <label>绾跨▼</label>
+              <label>线程</label>
               <input type="number" id="threadCountInput" value="3" min="1" max="10" />
             </div>
           </div>
@@ -114,7 +114,7 @@
                 <input type="checkbox" id="autoRegisterCheck" />
                 <span class="toggle-track"></span>
               </span>
-              <span>姹犱笉瓒宠嚜鍔ㄦ敞鍐?/span>
+              <span>池不足自动补号</span>
             </label>
           </div>
           <div class="toggle-row">
@@ -123,68 +123,68 @@
                 <input type="checkbox" id="localAutoMaintainCheck" />
                 <span class="toggle-track"></span>
               </span>
-              <span>本地定时测活删号</span>
+              <span>ضʱɾ</span>
             </label>
           </div>
           <div class="toggle-row">
             <div class="thread-count-wrap">
-              <label>期望数量</label>
+              <label></label>
               <input type="number" id="expectedTokenCountInput" value="0" min="0" />
             </div>
             <div class="thread-count-wrap">
-              <label>测活间隔(分)</label>
+              <label>()</label>
               <input type="number" id="localMaintainIntervalInput" value="30" min="5" />
             </div>
           </div>
           <div class="control-buttons">
             <button id="btnStart" class="btn btn-success">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              鍚姩
+              启动
             </button>
             <button id="btnStop" class="btn btn-danger" disabled>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-              鍋滄
+              停止
             </button>
           </div>
         </div>
 
-        <!-- 缁熻 -->
+        <!-- 统计 -->
         <div class="panel-section">
-          <div class="section-title">缁熻</div>
+          <div class="section-title">统计</div>
           <div class="stats-grid">
             <div class="stat-card">
               <div id="statSuccess" class="stat-value green">0</div>
-              <div class="stat-label">鎴愬姛</div>
+              <div class="stat-label">成功</div>
             </div>
             <div class="stat-card">
               <div id="statFail" class="stat-value red">0</div>
-              <div class="stat-label">澶辫触</div>
+              <div class="stat-label">失败</div>
             </div>
             <div class="stat-card span-2">
               <div id="statTotal" class="stat-value blue">0</div>
-              <div class="stat-label">鎬昏</div>
+              <div class="stat-label">总计</div>
             </div>
           </div>
         </div>
 
-        <!-- 娉ㄥ唽姝ラ杩借釜 -->
+        <!-- 注册步骤追踪 -->
         <div class="panel-section">
-          <div class="section-title">娉ㄥ唽杩涘害</div>
+          <div class="section-title">注册进度</div>
           <div id="stepsTracker" class="steps-tracker"></div>
         </div>
 
       </aside>
 
-      <!-- 鎷栨嫿鍒嗛殧鏉★紙宸︼級 -->
+      <!-- 拖拽分隔条（左） -->
       <div class="resize-handle" id="resizeLeft"></div>
 
-      <!-- ===== 涓爮锛氭棩蹇楅潰鏉?===== -->
+      <!-- ===== 中栏：日志面板 ===== -->
       <main class="main-area">
         <div class="log-panel">
           <div class="log-header">
             <div class="log-title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              <span>瀹炴椂鏃ュ織</span>
+              <span>实时日志</span>
               <span id="logCount" class="log-count-badge">0</span>
             </div>
             <div class="log-actions">
@@ -193,117 +193,117 @@
                   <input type="checkbox" id="autoScrollCheck" checked />
                   <span class="toggle-track"></span>
                 </span>
-                <span>鑷姩婊氬姩</span>
+                <span>自动滚动</span>
               </label>
-              <button id="clearLogBtn" class="btn btn-ghost btn-sm">娓呯┖</button>
+              <button id="clearLogBtn" class="btn btn-ghost btn-sm">清空</button>
             </div>
           </div>
           <div id="logBody" class="log-body">
             <div class="log-entry log-placeholder">
-              绛夊緟浠诲姟鍚姩...
+              等待任务启动...
             </div>
           </div>
         </div>
       </main>
 
-      <!-- 鎷栨嫿鍒嗛殧鏉★紙鍙筹級 -->
+      <!-- 拖拽分隔条（右） -->
       <div class="resize-handle" id="resizeRight"></div>
 
-      <!-- ===== 鍙虫爮锛氭睜鐘舵€?+ Token ===== -->
+      <!-- ===== 右栏：池状态 + Token ===== -->
       <aside class="data-panel">
 
-        <!-- Sub2Api 璐﹀彿姹?-->
-        <div class="pool-section-header">Sub2Api 璐﹀彿姹?/div>
+        <!-- Sub2Api 账号池 -->
+        <div class="pool-section-header">Sub2Api 账号池</div>
         <div class="pool-overview">
           <div class="pool-stat-card">
             <div id="sub2apiPoolTotal" class="stat-value blue">--</div>
-            <div class="stat-label">鎬昏处鍙?/div>
+            <div class="stat-label">总账号</div>
           </div>
           <div class="pool-stat-card">
             <div id="sub2apiPoolNormal" class="stat-value green">--</div>
-            <div class="stat-label">姝ｅ父</div>
+            <div class="stat-label">正常</div>
           </div>
           <div class="pool-stat-card">
             <div id="sub2apiPoolError" class="stat-value red">--</div>
-            <div class="stat-label">寮傚父</div>
+            <div class="stat-label">异常</div>
           </div>
           <div class="pool-stat-card">
             <div id="sub2apiPoolThreshold" class="stat-value muted">--</div>
-            <div class="stat-label">鐩爣</div>
+            <div class="stat-label">目标</div>
           </div>
           <div class="pool-stat-card">
             <div id="sub2apiPoolPercent" class="stat-value">--</div>
-            <div class="stat-label">鍏呰冻鐜?/div>
+            <div class="stat-label">充足率</div>
           </div>
           <div class="pool-action-group">
-            <button id="sub2apiPoolRefreshBtn" class="btn btn-ghost btn-sm">鍒锋柊</button>
-            <button id="sub2apiPoolMaintainBtn" class="btn btn-primary btn-sm">缁存姢</button>
+            <button id="sub2apiPoolRefreshBtn" class="btn btn-ghost btn-sm">刷新</button>
+            <button id="sub2apiPoolMaintainBtn" class="btn btn-primary btn-sm">维护</button>
             <span id="sub2apiPoolMaintainStatus" class="inline-status"></span>
           </div>
         </div>
 
-        <!-- CPA 璐﹀彿姹?-->
-        <div class="pool-section-header">CPA 璐﹀彿姹?/div>
+        <!-- CPA 账号池 -->
+        <div class="pool-section-header">CPA 账号池</div>
         <div class="pool-overview">
           <div class="pool-stat-card">
             <div id="poolTotal" class="stat-value blue">--</div>
-            <div class="stat-label">鎬昏处鍙?/div>
+            <div class="stat-label">总账号</div>
           </div>
           <div class="pool-stat-card">
             <div id="poolCandidates" class="stat-value green">--</div>
-            <div class="stat-label">姝ｅ父</div>
+            <div class="stat-label">正常</div>
           </div>
           <div class="pool-stat-card">
             <div id="poolError" class="stat-value red">--</div>
-            <div class="stat-label">寮傚父</div>
+            <div class="stat-label">异常</div>
           </div>
           <div class="pool-stat-card">
             <div id="poolThreshold" class="stat-value muted">--</div>
-            <div class="stat-label">鐩爣</div>
+            <div class="stat-label">目标</div>
           </div>
           <div class="pool-stat-card">
             <div id="poolPercent" class="stat-value">--</div>
-            <div class="stat-label">鍏呰冻鐜?/div>
+            <div class="stat-label">充足率</div>
           </div>
           <div class="pool-action-group">
-            <button id="poolRefreshBtn" class="btn btn-ghost btn-sm">鍒锋柊</button>
-            <button id="poolMaintainBtn" class="btn btn-primary btn-sm">缁存姢</button>
+            <button id="poolRefreshBtn" class="btn btn-ghost btn-sm">刷新</button>
+            <button id="poolMaintainBtn" class="btn btn-primary btn-sm">维护</button>
             <span id="poolMaintainStatus" class="inline-status"></span>
           </div>
         </div>
 
-        <!-- Token 琛ㄦ牸 -->
+        <!-- Token 表格 -->
         <div class="pool-table-wrap">
           <div class="pool-table-header">
             <div class="log-title">
-              <span>鏈湴 Token</span>
+              <span>本地 Token</span>
               <span id="poolTokenCount" class="log-count-badge">0</span>
             </div>
-            <div id="poolRecentTokenTotal" class="token-summary">近期总Token: 0</div>
+            <div id="poolRecentTokenTotal" class="token-summary">Token: 0</div>
             <div style="display:flex;gap:6px;">
-              <button id="poolCopyRtBtn" class="btn btn-ghost btn-sm">澶嶅埗 RT</button>
-              <button id="poolPwSyncBtn" class="btn btn-primary btn-sm">鎵归噺瀵煎叆</button>
+              <button id="poolCopyRtBtn" class="btn btn-ghost btn-sm">复制 RT</button>
+              <button id="poolPwSyncBtn" class="btn btn-primary btn-sm">批量导入</button>
             </div>
           </div>
           <div class="token-filter-row">
             <select id="tokenFilterStatus" class="token-filter-select">
-              <option value="all">鍏ㄩ儴</option>
-              <option value="synced">浠呭凡瀵煎叆</option>
-              <option value="unsynced">浠呮湭瀵煎叆</option>
-              <option value="cpa">浠?CPA</option>
-              <option value="sub2api">浠?Sub2Api</option>
+              <option value="all">全部</option>
+              <option value="synced">仅已导入</option>
+              <option value="unsynced">仅未导入</option>
+              <option value="cpa">?CPA</option>
+              <option value="sub2api">?Sub2Api</option>
               <option value="both">CPA + Sub2Api</option>
             </select>
-            <input id="tokenFilterKeyword" type="text" placeholder="绛涢€夐偖绠?鏂囦欢鍚? />
-            <button id="tokenFilterApplyBtn" class="btn btn-ghost btn-sm">绛涢€?/button>
-            <button id="tokenFilterResetBtn" class="btn btn-ghost btn-sm">閲嶇疆</button>
+            <input id="tokenFilterKeyword" type="text" placeholder="筛邮箱/文件" />
+            <button id="tokenFilterApplyBtn" class="btn btn-ghost btn-sm">筛选</button>
+            <button id="tokenFilterResetBtn" class="btn btn-ghost btn-sm">重置</button>
           </div>
           <div id="poolTokenList" class="token-list">
             <div class="empty-state">
               <div class="empty-icon">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
               </div>
-              <span>鏆傛棤 Token</span>
+              <span>暂无 Token</span>
             </div>
           </div>
         </div>
@@ -314,43 +314,43 @@
 
   </div>
 
-  <!-- ========== 閰嶇疆涓績 Tab ========== -->
+  <!-- ========== 配置中心 Tab ========== -->
   <div id="tabConfig" class="tab-panel" role="tabpanel">
     <div class="config-page">
 
-      <!-- 鍏ㄥ眬涓婁紶绛栫暐 -->
+      <!-- 全局上传策略 -->
       <div class="config-card collapsible open" style="grid-column: span 2;">
         <div class="collapsible-trigger">
-          <span>鍏ㄥ眬涓婁紶绛栫暐</span>
-          <span class="collapse-icon">鈻?/span>
+          <span>全局上传策略</span>
+          <span class="collapse-icon">?</span>
         </div>
         <div class="collapsible-body">
           <div class="config-field" style="max-width:720px;">
-            <label>涓婁紶绛栫暐</label>
+            <label>上传策略</label>
             <select id="uploadMode">
-              <option value="snapshot">涓茶琛ュ钩鍙帮紙鍏圕PA鍚嶴ub2Api锛?/option>
-              <option value="decoupled">鍙屽钩鍙板悓浼狅紙鍗曡处鍙峰弻涓婁紶锛?/option>
+              <option value="snapshot">串行补平台（先 CPA 后 Sub2Api）</option>
+              <option value="decoupled">双平台同传（单账号双上传）</option>
             </select>
             <div class="config-hint">
-              涓茶妯″紡鏇翠繚瀹堬紱骞惰妯″紡浼氳鍗曡处鍙峰苟鍙戜笂浼犲埌涓や釜骞冲彴銆傚綋鍓嶄换鍔¤繍琛屼腑鍒囨崲绛栫暐锛屽皢鍦ㄤ笅杞换鍔＄敓鏁堛€?
+              串行模式更保守；并行模式会让单账号并发上传到两个平台。当前任务运行中切换策略，将在下轮任务生效。
             </div>
           </div>
           <div class="config-actions" style="margin-top:8px;">
-            <button id="uploadModeSaveBtn" class="btn btn-primary btn-sm">淇濆瓨绛栫暐</button>
+            <button id="uploadModeSaveBtn" class="btn btn-primary btn-sm">保存策略</button>
             <span id="uploadModeStatus" class="inline-status"></span>
           </div>
         </div>
       </div>
 
-      <!-- 璇锋眰浠ｇ悊姹犻厤缃?-->
+      <!-- 请求代理池配置 -->
       <div class="config-card collapsible open" style="grid-column: span 2;">
         <div class="collapsible-trigger">
-          <span>璇锋眰浠ｇ悊姹犻厤缃?/span>
-          <span class="collapse-icon">鈻?/span>
+          <span>请求代理池配置</span>
+          <span class="collapse-icon">?</span>
         </div>
         <div class="collapsible-body">
           <div class="config-hint" style="margin-top:0;">
-            Select provider type. ZenProxy uses api_key/count/country; Dreamy socks5-proxy and docker-warp-socks use fixed proxy URL.
+            选择代理池类型。ZenProxy 使用 api_key/count/country；Dreamy socks5-proxy 与 docker-warp-socks 使用固定代理 URL。
           </div>
           <div class="toggle-row" style="margin-top:10px;">
             <label class="ios-toggle-label" for="proxyPoolEnabled">
@@ -358,11 +358,11 @@
                 <input type="checkbox" id="proxyPoolEnabled" />
                 <span class="toggle-track"></span>
               </span>
-              <span>鍚敤璇锋眰鍓嶄唬鐞嗘睜</span>
+              <span>启用请求前代理池</span>
             </label>
           </div>
           <div class="config-field">
-            <label>代理池类型</label>
+            <label></label>
             <select id="proxyPoolProvider">
               <option value="zenproxy_api">ZenProxy API</option>
               <option value="dreamy_socks5_pool">Dreamy socks5-proxy</option>
@@ -370,45 +370,45 @@
             </select>
           </div>
           <div class="config-field">
-            <label id="proxyPoolApiUrlLabel">Fetch API URL</label>
+            <label id="proxyPoolApiUrlLabel">抓取 API 地址</label>
             <input type="text" id="proxyPoolApiUrl" value="https://zenproxy.top/api/fetch" autocomplete="off" spellcheck="false" />
           </div>
           <div class="config-row" id="proxyPoolZenAuthRow">
             <div class="config-field" style="flex:1;">
-              <label>璁よ瘉鏂瑰紡</label>
+              <label>认证方式</label>
               <select id="proxyPoolAuthMode">
-                <option value="query">Query 鍙傛暟</option>
+                <option value="query">Query 参数</option>
                 <option value="header">Header Bearer</option>
               </select>
             </div>
             <div class="config-field" style="flex:1;">
-              <label>API Key锛堢暀绌哄垯淇濇寔鍘熷€硷級</label>
+              <label>API Key（留空则保持原）</label>
               <input type="password" id="proxyPoolApiKey" placeholder="19c0ec43-8f76-4c97-81bc-bcda059eeba4" autocomplete="off" />
             </div>
           </div>
           <div class="config-row" id="proxyPoolZenFilterRow">
             <div class="config-field" style="max-width:180px;">
-              <label>Count</label>
+              <label>数量 Count</label>
               <input type="number" id="proxyPoolCount" value="1" min="1" max="20" />
             </div>
             <div class="config-field" style="max-width:180px;">
-              <label>Country</label>
+              <label>国家 Country</label>
               <input type="text" id="proxyPoolCountry" value="US" maxlength="8" autocomplete="off" spellcheck="false" />
             </div>
           </div>
           <div class="config-actions">
-            <button id="proxyPoolTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯浠ｇ悊姹犲彇鍙?/button>
-            <button id="proxyPoolSaveBtn" class="btn btn-primary btn-sm">淇濆瓨浠ｇ悊姹犻厤缃?/button>
+            <button id="proxyPoolTestBtn" class="btn btn-ghost btn-sm">测试代理池获取</button>
+            <button id="proxyPoolSaveBtn" class="btn btn-primary btn-sm">保存代理池配置</button>
             <span id="proxyPoolStatus" class="inline-status"></span>
           </div>
         </div>
       </div>
 
-      <!-- CPA 骞冲彴閰嶇疆 -->
+      <!-- CPA 平台配置 -->
       <div class="config-card collapsible open">
         <div class="collapsible-trigger">
-          <span>CPA 骞冲彴閰嶇疆</span>
-          <span class="collapse-icon">鈻?/span>
+          <span>CPA 平台配置</span>
+          <span class="collapse-icon">?</span>
         </div>
         <div class="collapsible-body">
           <div class="config-field">
@@ -418,15 +418,15 @@
           </div>
           <div class="config-field">
             <label>Token</label>
-            <input type="password" id="cpaToken" placeholder="CPA 鐧诲綍瀵嗙爜" autocomplete="off" />
+            <input type="password" id="cpaToken" placeholder="CPA 登录密码" autocomplete="off" />
           </div>
           <div class="config-row">
             <div class="config-field" style="flex:1;">
-              <label>鐩爣闃堝€?/label>
+              <label>目标阈值</label>
               <input type="number" id="cpaMinCandidates" value="800" min="1" />
             </div>
             <div class="config-field" style="flex:1;">
-              <label>浣跨敤鐜囬槇鍊?%)</label>
+              <label>使用率阈值(%)</label>
               <input type="number" id="cpaUsedPercent" value="95" min="1" max="100" />
             </div>
           </div>
@@ -437,40 +437,40 @@
                   <input type="checkbox" id="cpaAutoMaintain" />
                   <span class="toggle-track"></span>
                 </span>
-                <span>鑷姩缁存姢</span>
+                <span>自动维护</span>
               </label>
             </div>
             <div class="config-field" style="flex:1;">
-              <label>闂撮殧(鍒嗛挓)</label>
+              <label>间隔(分钟)</label>
               <input type="number" id="cpaInterval" value="30" min="5" />
             </div>
           </div>
           <div class="config-actions">
-            <button id="cpaTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
-            <button id="cpaSaveBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <button id="cpaTestBtn" class="btn btn-ghost btn-sm">测试连接</button>
+            <button id="cpaSaveBtn" class="btn btn-primary btn-sm">保存</button>
             <span id="cpaStatus" class="inline-status"></span>
           </div>
         </div>
       </div>
 
-      <!-- Sub2Api 骞冲彴閰嶇疆 -->
+      <!-- Sub2Api 平台配置 -->
       <div class="config-card collapsible open">
         <div class="collapsible-trigger">
-          <span>Sub2Api 骞冲彴閰嶇疆</span>
-          <span class="collapse-icon">鈻?/span>
+          <span>Sub2Api 平台配置</span>
+          <span class="collapse-icon">?</span>
         </div>
         <div class="collapsible-body">
           <div class="config-field">
-            <label>骞冲彴鍦板潃</label>
+            <label>平台地址</label>
             <input type="text" id="sub2apiBaseUrl" value="" autocomplete="off" spellcheck="false" />
           </div>
           <div class="config-row">
             <div class="config-field" style="flex:1;">
-              <label>绠＄悊鍛橀偖绠?/label>
+              <label>管理员邮箱</label>
               <input type="text" id="sub2apiEmail" value="" autocomplete="off" placeholder="admin@example.com" />
             </div>
             <div class="config-field" style="flex:1;">
-              <label>瀵嗙爜</label>
+              <label>密码</label>
               <input type="password" id="sub2apiPassword" value="" autocomplete="off" />
             </div>
           </div>
@@ -480,16 +480,16 @@
                 <input type="checkbox" id="autoSyncCheck" checked />
                 <span class="toggle-track"></span>
               </span>
-              <span>娉ㄥ唽鍚庤嚜鍔ㄥ鍏?/span>
+              <span>注册后自动同步</span>
             </label>
           </div>
           <div class="config-row" style="margin-top:10px;">
             <div class="config-field" style="flex:1;">
-              <label>鐩爣闃堝€?/label>
+              <label>目标阈值</label>
               <input type="number" id="sub2apiMinCandidates" value="200" min="1" />
             </div>
             <div class="config-field" style="flex:1;">
-              <label>缁存姢闂撮殧(鍒嗛挓)</label>
+              <label>维护间隔(分钟)</label>
               <input type="number" id="sub2apiInterval" value="30" min="5" />
             </div>
           </div>
@@ -499,22 +499,22 @@
                 <input type="checkbox" id="sub2apiAutoMaintain" />
                 <span class="toggle-track"></span>
               </span>
-              <span>鑷姩缁存姢</span>
+              <span>自动维护</span>
             </label>
           </div>
           <div class="config-actions">
-            <button id="sub2apiTestPoolBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
-            <button id="saveSyncConfigBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <button id="sub2apiTestPoolBtn" class="btn btn-ghost btn-sm">测试连接</button>
+            <button id="saveSyncConfigBtn" class="btn btn-primary btn-sm">保存</button>
             <span id="syncStatus" class="inline-status"></span>
           </div>
         </div>
       </div>
 
-      <!-- 閭鎻愪緵鍟?-->
+      <!-- 邮箱提供商 -->
       <div class="config-card collapsible open" style="grid-column: span 2;">
         <div class="collapsible-trigger">
-          <span>閭鎻愪緵鍟?/span>
-          <span class="collapse-icon">鈻?/span>
+          <span>邮箱提供商</span>
+          <span class="collapse-icon">?</span>
         </div>
         <div class="collapsible-body">
           <div class="mail-providers-group">
@@ -522,11 +522,11 @@
               <label class="provider-toggle">
                 <input type="checkbox" class="mail-provider-check" value="mailtm" checked />
                 <span class="provider-check-mark"></span>
-                Mail.tm (鍏嶈垂)
+                Mail.tm (免费)
               </label>
               <div class="provider-config">
                 <div class="config-field">
-                  <label>API 鍦板潃</label>
+                  <label>API 地址</label>
                   <input type="text" data-key="api_base" placeholder="https://api.mail.tm" autocomplete="off"
                     spellcheck="false" />
                 </div>
@@ -540,7 +540,7 @@
               </label>
               <div class="provider-config" style="display:none;">
                 <div class="config-field">
-                  <label>API 鍦板潃</label>
+                  <label>API 地址</label>
                   <input type="text" data-key="api_base" placeholder="https://your-moemail-api.example.com" autocomplete="off"
                     spellcheck="false" />
                 </div>
@@ -558,7 +558,7 @@
               </label>
               <div class="provider-config" style="display:none;">
                 <div class="config-field">
-                  <label>API 鍦板潃</label>
+                  <label>API 地址</label>
                   <input type="text" data-key="api_base" placeholder="https://api.duckmail.sbs" autocomplete="off"
                     spellcheck="false" />
                 </div>
@@ -577,25 +577,25 @@
               </label>
               <div class="provider-config" style="display:none;">
                 <div class="config-field">
-                  <label>API Base URL</label>
+                  <label>API 基础地址</label>
                   <input type="text" data-key="api_base" placeholder="https://temp-email-api.awsl.uk" autocomplete="off"
                     spellcheck="false" />
                 </div>
                 <div class="config-field">
-                  <label>Domain (optional; auto detect when empty)</label>
+                  <label>域名（可选，留空自动识别）</label>
                   <input type="text" data-key="domain" placeholder="example.com" autocomplete="off"
                     spellcheck="false" />
                 </div>
                 <div class="config-field">
-                  <label>Site Password (x-custom-auth)</label>
+                  <label>站点密码（x-custom-auth）</label>
                   <input type="password" data-key="site_password" placeholder="optional" autocomplete="off" />
                 </div>
                 <div class="config-field">
-                  <label>Admin Password (x-admin-auth)</label>
+                  <label>管理员密码（x-admin-auth）</label>
                   <input type="password" data-key="admin_password" placeholder="optional" autocomplete="off" />
                 </div>
                 <div class="config-field">
-                  <label>Enable Prefix</label>
+                  <label>启用前缀</label>
                   <select data-key="enable_prefix">
                     <option value="true">true</option>
                     <option value="false">false</option>
@@ -605,16 +605,16 @@
             </div>
           </div>
           <div class="config-field" style="margin-top:10px;max-width:240px;">
-            <label>璺敱绛栫暐</label>
+            <label>路由策略</label>
             <select id="mailStrategySelect">
-              <option value="round_robin">杞</option>
-              <option value="random">闅忔満</option>
-              <option value="failover">瀹归敊浼樺厛</option>
+              <option value="round_robin">轮询</option>
+              <option value="random">随机</option>
+              <option value="failover">容错优先</option>
             </select>
           </div>
           <div class="config-actions">
-            <button id="mailTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
-            <button id="mailSaveBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <button id="mailTestBtn" class="btn btn-ghost btn-sm">测试连接</button>
+            <button id="mailSaveBtn" class="btn btn-primary btn-sm">保存</button>
             <span id="mailStatus" class="inline-status"></span>
           </div>
         </div>
@@ -623,7 +623,7 @@
     </div>
   </div>
 
-  <!-- Toast 瀹瑰櫒 -->
+  <!-- Toast 容器 -->
   <div id="toastContainer" class="toast-container"></div>
 
   <script src="/static/app.js"></script>
