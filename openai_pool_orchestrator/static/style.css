@@ -1,42 +1,42 @@
 :root {
   --font-sans: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --bg: #11161d;
-  --bg-elev: #18202b;
-  --surface: #1b2430;
-  --surface-soft: #222d3a;
-  --text: #edf3fb;
-  --muted: #9eb0c5;
-  --line: #314154;
-  --primary: #2b88ff;
-  --primary-press: #1f76e7;
-  --accent: #13b8a6;
-  --danger: #ef4d64;
-  --warn: #f59f38;
-  --ok: #22b573;
-  --shadow-lg: 0 20px 45px rgba(3, 10, 18, 0.38);
-  --shadow-md: 0 10px 24px rgba(3, 10, 18, 0.26);
-  --radius-xl: 20px;
-  --radius-lg: 14px;
-  --radius-md: 12px;
-  --radius-sm: 9px;
+  --bg: #f5f7fa;
+  --bg-elev: #eef2f6;
+  --surface: #ffffff;
+  --surface-soft: #f9fafb;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --primary: #1677ff;
+  --primary-press: #0958d9;
+  --accent: #00a870;
+  --danger: #f04438;
+  --warn: #f79009;
+  --ok: #12b76a;
+  --shadow-lg: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --radius-xl: 14px;
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
 }
 
 body.theme-light {
-  --bg: #f3f6fb;
-  --bg-elev: #eaf0f8;
+  --bg: #f5f7fa;
+  --bg-elev: #eef2f6;
   --surface: #ffffff;
-  --surface-soft: #f6f8fc;
-  --text: #111827;
-  --muted: #61748a;
-  --line: #dce4ef;
-  --primary: #1f7aff;
-  --primary-press: #1567dd;
-  --accent: #0ea597;
-  --danger: #df3f58;
-  --warn: #d68a23;
-  --ok: #1e9f63;
-  --shadow-lg: 0 18px 40px rgba(15, 35, 64, 0.1);
-  --shadow-md: 0 8px 18px rgba(15, 35, 64, 0.08);
+  --surface-soft: #f9fafb;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --primary: #1677ff;
+  --primary-press: #0958d9;
+  --accent: #00a870;
+  --danger: #f04438;
+  --warn: #f79009;
+  --ok: #12b76a;
+  --shadow-lg: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
 }
 
 * { box-sizing: border-box; }
@@ -51,24 +51,12 @@ body {
 body {
   font-family: var(--font-sans);
   color: var(--text);
-  background:
-    radial-gradient(1100px 460px at -6% -18%, rgba(43, 136, 255, 0.22), transparent 54%),
-    radial-gradient(780px 380px at 106% -10%, rgba(19, 184, 166, 0.16), transparent 48%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg), #ffffff 2%) 0%, var(--bg) 64%);
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg) 100%);
   position: relative;
 }
 
 body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: .34;
-  background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--line), transparent 82%) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--line), transparent 86%) 1px, transparent 1px);
-  background-size: 26px 26px;
-  mask-image: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.7), transparent 84%);
+  content: none;
 }
 
 button,
@@ -89,8 +77,7 @@ textarea {
 
 .sidebar {
   border-right: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface), transparent 3%);
-  backdrop-filter: blur(12px);
+  background: var(--surface);
   padding: 22px 16px 16px;
   position: sticky;
   top: 0;
@@ -183,8 +170,7 @@ textarea {
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface), transparent 4%);
-  backdrop-filter: blur(8px);
+  background: var(--surface);
   padding: 15px 22px;
   position: sticky;
   top: 0;
@@ -229,7 +215,7 @@ textarea {
 
 .card {
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface), #ffffff 2%), var(--surface));
+  background: var(--surface);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   padding: 16px;

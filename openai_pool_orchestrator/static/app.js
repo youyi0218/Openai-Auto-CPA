@@ -26,6 +26,8 @@ const TOAST_ICONS = { info: 'i', success: '✓', warn: '!', error: '×' };
 const LEVEL_ICONS = { connected: '*', info: 'i', success: '✓', warn: '!', error: '×', token_saved: '+', sync_ok: '↗' };
 const THEME_KEY = 'oai_auto_cpa_theme_v1';
 const API_KEY_STORAGE = 'oai_auto_cpa_api_key_v1';
+const SECRET_MASK = '********';
+const SECRET_MAIL_KEYS = new Set(['bearer_token', 'api_key', 'site_password', 'admin_password', 'x_custom_auth', 'x_admin_auth']);
 const rawFetch = window.fetch.bind(window);
 
 document.addEventListener('DOMContentLoaded', init);
@@ -35,6 +37,7 @@ function init() {
   initApiKey();
   initPasswordToggles();
   initMailFieldDirtyTracking();
+  initSecretFieldDirtyTracking();
   initNav();
   initCollapsible();
   initTheme();
@@ -63,6 +66,8 @@ function mapDom() {
     'poolTotal','poolCandidates','poolError','poolThreshold','poolPercent','poolRefreshBtn','poolMaintainBtn','poolMaintainStatus',
     'poolTokenCount','poolRecentTokenTotal','poolCopyRtBtn','poolPwSyncBtn','tokenFilterStatus','tokenFilterKeyword','tokenFilterApplyBtn','tokenFilterResetBtn','poolTokenList',
     'sub2apiBaseUrl','sub2apiEmail','sub2apiPassword','autoSyncCheck','sub2apiMinCandidates','sub2apiAutoMaintain','sub2apiInterval','sub2apiTestPoolBtn','saveSyncConfigBtn','syncStatus',
+    'autoRegisterCfgEnabled','autoRegisterCfgProxy','autoRegisterCfgDesired','autoRegisterCfgMultithread','autoRegisterCfgThreads','autoRegisterCfgSaveBtn','autoRegisterCfgStatus',
+    'autoMaintainCfgEnabled','autoMaintainCfgInterval','autoMaintainCfgProbeTimeout','autoMaintainRunBtn','autoMaintainCfgSaveBtn','autoMaintainCfgStatus',
     'uploadMode','uploadModeSaveBtn','uploadModeStatus',
     'proxyPoolEnabled','proxyPoolProvider','proxyPoolApiUrlLabel','proxyPoolApiUrl','proxyPoolZenAuthRow','proxyPoolZenFilterRow','proxyPoolAuthMode','proxyPoolApiKey','proxyPoolCount','proxyPoolCountry','proxyPoolTestBtn','proxyPoolSaveBtn','proxyPoolStatus',
     'cpaBaseUrl','cpaToken','cpaMinCandidates','cpaUsedPercent','cpaAutoMaintain','cpaInterval','cpaTestBtn','cpaSaveBtn','cpaStatus',
@@ -74,6 +79,9 @@ function mapDom() {
 function bindEvents() {
   on(DOM.checkProxyBtn, 'click', checkProxy);
   on(DOM.saveProxyBtn, 'click', saveProxy);
+  on(DOM.autoRegisterCfgSaveBtn, 'click', saveAutoRegisterConfig);
+  on(DOM.autoMaintainCfgSaveBtn, 'click', saveAutoMaintainConfig);
+  on(DOM.autoMaintainRunBtn, 'click', runAutoMaintainNow);
   on(DOM.btnStart, 'click', startTask);
   on(DOM.btnStop, 'click', stopTask);
   on(DOM.clearLogBtn, 'click', clearLog);
@@ -148,12 +156,39 @@ function initPasswordToggles() {
 function initMailFieldDirtyTracking() {
   document.querySelectorAll('.provider-item [data-key]').forEach((el) => {
     if (el.dataset.dirtyBind === '1') return;
-    const markDirty = () => { el.dataset.dirty = '1'; };
+    const markDirty = () => {
+      el.dataset.dirty = '1';
+      if (el.value !== SECRET_MASK) el.dataset.masked = '0';
+    };
     el.addEventListener('input', markDirty);
     el.addEventListener('change', markDirty);
     el.dataset.dirtyBind = '1';
     if (!el.dataset.dirty) el.dataset.dirty = '0';
   });
+}
+
+function initSecretFieldDirtyTracking() {
+  [DOM.cpaToken, DOM.proxyPoolApiKey].forEach((el) => {
+    if (!el || el.dataset.secretBind === '1') return;
+    const markDirty = () => {
+      el.dataset.dirty = '1';
+      if (el.value !== SECRET_MASK) el.dataset.masked = '0';
+    };
+    el.addEventListener('input', markDirty);
+    el.addEventListener('change', markDirty);
+    el.dataset.secretBind = '1';
+    if (!el.dataset.dirty) el.dataset.dirty = '0';
+    if (!el.dataset.masked) el.dataset.masked = '0';
+  });
+}
+
+function getSecretInputState(el) {
+  const raw = String(el?.value || '');
+  const trimmed = raw.trim();
+  const dirty = el?.dataset?.dirty === '1';
+  const masked = el?.dataset?.masked === '1' && raw === SECRET_MASK && !dirty;
+  const clear = dirty && trimmed === '';
+  return { raw, trimmed, dirty, masked, clear };
 }
 
 function initApiKey() {
@@ -416,19 +451,147 @@ async function saveProxy() {
     proxy: (DOM.proxyInput?.value || '').trim(),
     auto_register: !!DOM.autoRegisterCheck?.checked,
     desired_token_count: num(DOM.expectedTokenCountInput?.value),
+    multithread: !!DOM.multithreadCheck?.checked,
+    thread_count: num(DOM.threadCountInput?.value, 3),
     local_auto_maintain: !!DOM.localAutoMaintainCheck?.checked,
     local_maintain_interval_minutes: num(DOM.localMaintainIntervalInput?.value, 30),
+    local_probe_timeout_seconds: num(DOM.autoMaintainCfgProbeTimeout?.value, 12),
   };
   if (DOM.saveProxyBtn) DOM.saveProxyBtn.disabled = true;
   try {
     const res = await apiFetch('/api/proxy/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const d = await res.json();
     if (!res.ok) return showToast(d.detail || '保存失败', 'error');
+    syncAutoRegisterViews(payload);
+    syncAutoMaintainViews(payload);
     showToast('代理配置已保存', 'success');
   } catch (e) {
     showToast(`保存失败: ${e.message}`, 'error');
   }
   if (DOM.saveProxyBtn) DOM.saveProxyBtn.disabled = false;
+}
+
+function syncAutoRegisterViews(values = {}) {
+  const proxy = String(values.proxy ?? '').trim();
+  const enabled = !!values.auto_register;
+  const desired = num(values.desired_token_count, 0);
+  const multithread = !!values.multithread;
+  const threads = Math.max(1, Math.min(10, num(values.thread_count, 3)));
+
+  if (DOM.proxyInput) DOM.proxyInput.value = proxy;
+  if (DOM.autoRegisterCfgProxy) DOM.autoRegisterCfgProxy.value = proxy;
+  if (DOM.autoRegisterCheck) DOM.autoRegisterCheck.checked = enabled;
+  if (DOM.autoRegisterCfgEnabled) DOM.autoRegisterCfgEnabled.checked = enabled;
+  if (DOM.expectedTokenCountInput) DOM.expectedTokenCountInput.value = desired;
+  if (DOM.autoRegisterCfgDesired) DOM.autoRegisterCfgDesired.value = desired;
+  if (DOM.multithreadCheck) DOM.multithreadCheck.checked = multithread;
+  if (DOM.autoRegisterCfgMultithread) DOM.autoRegisterCfgMultithread.checked = multithread;
+  if (DOM.threadCountInput) DOM.threadCountInput.value = threads;
+  if (DOM.autoRegisterCfgThreads) DOM.autoRegisterCfgThreads.value = threads;
+}
+
+function syncAutoMaintainViews(values = {}) {
+  const enabled = !!values.local_auto_maintain;
+  const interval = Math.max(5, num(values.local_maintain_interval_minutes, 30));
+  const timeout = Math.max(5, Math.min(60, num(values.local_probe_timeout_seconds, 12)));
+
+  if (DOM.localAutoMaintainCheck) DOM.localAutoMaintainCheck.checked = enabled;
+  if (DOM.autoMaintainCfgEnabled) DOM.autoMaintainCfgEnabled.checked = enabled;
+  if (DOM.localMaintainIntervalInput) DOM.localMaintainIntervalInput.value = interval;
+  if (DOM.autoMaintainCfgInterval) DOM.autoMaintainCfgInterval.value = interval;
+  if (DOM.autoMaintainCfgProbeTimeout) DOM.autoMaintainCfgProbeTimeout.value = timeout;
+}
+
+async function saveAutoRegisterConfig() {
+  if (DOM.autoRegisterCfgSaveBtn) DOM.autoRegisterCfgSaveBtn.disabled = true;
+
+  const payload = {
+    proxy: (DOM.autoRegisterCfgProxy?.value || '').trim(),
+    auto_register: !!DOM.autoRegisterCfgEnabled?.checked,
+    desired_token_count: Math.max(0, num(DOM.autoRegisterCfgDesired?.value, 0)),
+    multithread: !!DOM.autoRegisterCfgMultithread?.checked,
+    thread_count: Math.max(1, Math.min(10, num(DOM.autoRegisterCfgThreads?.value, 3))),
+  };
+
+  try {
+    const res = await apiFetch('/api/proxy/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.autoRegisterCfgStatus) DOM.autoRegisterCfgStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    syncAutoRegisterViews(payload);
+    if (DOM.autoRegisterCfgStatus) DOM.autoRegisterCfgStatus.textContent = '自动注册配置已保存';
+    showToast('自动注册配置已保存', 'success');
+  } catch (e) {
+    if (DOM.autoRegisterCfgStatus) DOM.autoRegisterCfgStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  if (DOM.autoRegisterCfgSaveBtn) DOM.autoRegisterCfgSaveBtn.disabled = false;
+}
+
+async function saveAutoMaintainConfig() {
+  if (DOM.autoMaintainCfgSaveBtn) DOM.autoMaintainCfgSaveBtn.disabled = true;
+
+  const payload = {
+    local_auto_maintain: !!DOM.autoMaintainCfgEnabled?.checked,
+    local_maintain_interval_minutes: Math.max(5, num(DOM.autoMaintainCfgInterval?.value, 30)),
+    local_probe_timeout_seconds: Math.max(5, Math.min(60, num(DOM.autoMaintainCfgProbeTimeout?.value, 12))),
+  };
+
+  try {
+    const res = await apiFetch('/api/proxy/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    syncAutoMaintainViews(payload);
+    if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = '自动保活配置已保存';
+    showToast('自动保活配置已保存', 'success');
+  } catch (e) {
+    if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  if (DOM.autoMaintainCfgSaveBtn) DOM.autoMaintainCfgSaveBtn.disabled = false;
+}
+
+async function runAutoMaintainNow() {
+  if (!DOM.autoMaintainRunBtn) return;
+  const old = DOM.autoMaintainRunBtn.textContent;
+  DOM.autoMaintainRunBtn.disabled = true;
+  DOM.autoMaintainRunBtn.textContent = '执行中...';
+  if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = '正在执行本地测活...';
+
+  try {
+    const res = await apiFetch('/api/local/maintain', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = d.detail || '执行失败';
+      return showToast(d.detail || '执行失败', 'error');
+    }
+    if (DOM.autoMaintainCfgStatus) {
+      DOM.autoMaintainCfgStatus.textContent = `已完成：检查 ${num(d.checked)}，删除 ${num(d.deleted_ok)}，剩余 ${num(d.remaining)}`;
+    }
+    showToast('本地测活执行完成', 'success');
+    loadTokens();
+  } catch (e) {
+    if (DOM.autoMaintainCfgStatus) DOM.autoMaintainCfgStatus.textContent = `执行失败: ${e.message}`;
+    showToast(`执行失败: ${e.message}`, 'error');
+  }
+
+  DOM.autoMaintainRunBtn.disabled = false;
+  DOM.autoMaintainRunBtn.textContent = old || '立即执行一次';
 }
 
 async function startTask() {
@@ -629,14 +792,20 @@ async function loadSyncConfig() {
     if (DOM.sub2apiAutoMaintain) DOM.sub2apiAutoMaintain.checked = !!c.sub2api_auto_maintain;
     if (DOM.sub2apiInterval) DOM.sub2apiInterval.value = c.sub2api_maintain_interval_minutes || 30;
 
-    if (DOM.multithreadCheck) DOM.multithreadCheck.checked = !!c.multithread;
-    if (DOM.threadCountInput) DOM.threadCountInput.value = c.thread_count || 3;
+    syncAutoRegisterViews({
+      proxy: c.proxy || '',
+      auto_register: !!c.auto_register,
+      desired_token_count: c.desired_token_count || 0,
+      multithread: !!c.multithread,
+      thread_count: c.thread_count || 3,
+    });
 
-    if (DOM.proxyInput && c.proxy) DOM.proxyInput.value = c.proxy;
-    if (DOM.autoRegisterCheck) DOM.autoRegisterCheck.checked = !!c.auto_register;
-    if (DOM.expectedTokenCountInput) DOM.expectedTokenCountInput.value = c.desired_token_count || 0;
-    if (DOM.localAutoMaintainCheck) DOM.localAutoMaintainCheck.checked = !!c.local_auto_maintain;
-    if (DOM.localMaintainIntervalInput) DOM.localMaintainIntervalInput.value = c.local_maintain_interval_minutes || 30;
+    syncAutoMaintainViews({
+      local_auto_maintain: !!c.local_auto_maintain,
+      local_maintain_interval_minutes: c.local_maintain_interval_minutes || 30,
+      local_probe_timeout_seconds: c.local_probe_timeout_seconds || 12,
+    });
+
     if (DOM.apiAuthEnabled) DOM.apiAuthEnabled.checked = !!c.api_auth_enabled;
     if (DOM.apiAuthStatus && c.x_api_key_preview) {
       DOM.apiAuthStatus.textContent = `已保存 key: ${c.x_api_key_preview}`;
@@ -651,13 +820,38 @@ async function saveSyncConfig() {
   if (!base_url) return showToast('请填写 Sub2Api 地址', 'error');
   if (!email) return showToast('请填写管理员邮箱', 'error');
 
+  const autoRegCfg = {
+    proxy: (DOM.autoRegisterCfgProxy?.value || DOM.proxyInput?.value || '').trim(),
+    auto_register: DOM.autoRegisterCfgEnabled ? !!DOM.autoRegisterCfgEnabled.checked : !!DOM.autoRegisterCheck?.checked,
+    desired_token_count: DOM.autoRegisterCfgDesired ? num(DOM.autoRegisterCfgDesired.value, 0) : num(DOM.expectedTokenCountInput?.value, 0),
+    multithread: DOM.autoRegisterCfgMultithread ? !!DOM.autoRegisterCfgMultithread.checked : !!DOM.multithreadCheck?.checked,
+    thread_count: DOM.autoRegisterCfgThreads ? num(DOM.autoRegisterCfgThreads.value, 3) : num(DOM.threadCountInput?.value, 3),
+  };
+
+  const autoMaintainCfg = {
+    local_auto_maintain: DOM.autoMaintainCfgEnabled ? !!DOM.autoMaintainCfgEnabled.checked : !!DOM.localAutoMaintainCheck?.checked,
+    local_maintain_interval_minutes: DOM.autoMaintainCfgInterval ? num(DOM.autoMaintainCfgInterval.value, 30) : num(DOM.localMaintainIntervalInput?.value, 30),
+    local_probe_timeout_seconds: num(DOM.autoMaintainCfgProbeTimeout?.value, 12),
+  };
+
   const payload = {
-    base_url, email, password, account_name: 'AutoReg', auto_sync: DOM.autoSyncCheck?.checked ? 'true' : 'false',
-    upload_mode: DOM.uploadMode?.value || 'snapshot', sub2api_min_candidates: num(DOM.sub2apiMinCandidates?.value, 200),
-    sub2api_auto_maintain: !!DOM.sub2apiAutoMaintain?.checked, sub2api_maintain_interval_minutes: num(DOM.sub2apiInterval?.value, 30),
-    multithread: !!DOM.multithreadCheck?.checked, thread_count: num(DOM.threadCountInput?.value, 3),
-    auto_register: !!DOM.autoRegisterCheck?.checked, desired_token_count: num(DOM.expectedTokenCountInput?.value),
-    local_auto_maintain: !!DOM.localAutoMaintainCheck?.checked, local_maintain_interval_minutes: num(DOM.localMaintainIntervalInput?.value, 30),
+    base_url,
+    email,
+    password,
+    account_name: 'AutoReg',
+    auto_sync: DOM.autoSyncCheck?.checked ? 'true' : 'false',
+    upload_mode: DOM.uploadMode?.value || 'snapshot',
+    sub2api_min_candidates: num(DOM.sub2apiMinCandidates?.value, 200),
+    sub2api_auto_maintain: !!DOM.sub2apiAutoMaintain?.checked,
+    sub2api_maintain_interval_minutes: num(DOM.sub2apiInterval?.value, 30),
+    multithread: !!autoRegCfg.multithread,
+    thread_count: Math.max(1, Math.min(10, num(autoRegCfg.thread_count, 3))),
+    auto_register: !!autoRegCfg.auto_register,
+    desired_token_count: Math.max(0, num(autoRegCfg.desired_token_count, 0)),
+    local_auto_maintain: !!autoMaintainCfg.local_auto_maintain,
+    local_maintain_interval_minutes: Math.max(5, num(autoMaintainCfg.local_maintain_interval_minutes, 30)),
+    local_probe_timeout_seconds: Math.max(5, Math.min(60, num(autoMaintainCfg.local_probe_timeout_seconds, 12))),
+    proxy: autoRegCfg.proxy,
   };
 
   if (DOM.saveSyncConfigBtn) { DOM.saveSyncConfigBtn.disabled = true; DOM.saveSyncConfigBtn.textContent = '保存中...'; }
@@ -670,6 +864,8 @@ async function saveSyncConfig() {
       if (DOM.syncStatus) DOM.syncStatus.textContent = d.detail || '保存失败';
       return showToast(d.detail || '保存失败', 'error');
     }
+    syncAutoRegisterViews(payload);
+    syncAutoMaintainViews(payload);
     if (DOM.syncStatus) DOM.syncStatus.textContent = '配置已保存';
     showToast('Sub2Api 配置已保存', 'success');
     pollSub2ApiPoolStatus();
@@ -759,12 +955,15 @@ function onProxyPoolProviderChange() {
 
 function proxyPoolPayload() {
   const provider = normalizeProvider(DOM.proxyPoolProvider?.value || 'zenproxy_api');
+  const keyState = getSecretInputState(DOM.proxyPoolApiKey);
+  const proxyPoolApiKey = keyState.masked ? '' : keyState.trimmed;
   return {
     proxy_pool_enabled: !!DOM.proxyPoolEnabled?.checked,
     proxy_pool_provider: provider,
     proxy_pool_api_url: (DOM.proxyPoolApiUrl?.value || '').trim() || (PROVIDER_DEFAULTS[provider] || ''),
     proxy_pool_auth_mode: String(DOM.proxyPoolAuthMode?.value || 'query').trim().toLowerCase(),
-    proxy_pool_api_key: (DOM.proxyPoolApiKey?.value || '').trim(),
+    proxy_pool_api_key: proxyPoolApiKey,
+    clear_proxy_pool_api_key: keyState.clear,
     proxy_pool_count: num(DOM.proxyPoolCount?.value, 1),
     proxy_pool_country: String(DOM.proxyPoolCountry?.value || 'US').trim().toUpperCase() || 'US',
   };
@@ -783,8 +982,10 @@ async function loadProxyPoolConfig() {
     if (DOM.proxyPoolApiUrl) DOM.proxyPoolApiUrl.value = d.proxy_pool_api_url || PROVIDER_DEFAULTS[provider] || '';
     if (DOM.proxyPoolAuthMode) DOM.proxyPoolAuthMode.value = String(d.proxy_pool_auth_mode || 'query').toLowerCase();
     if (DOM.proxyPoolApiKey) {
-      DOM.proxyPoolApiKey.value = '';
-      if (d.proxy_pool_api_key_preview) DOM.proxyPoolApiKey.placeholder = d.proxy_pool_api_key_preview;
+      DOM.proxyPoolApiKey.value = d.proxy_pool_api_key_preview ? SECRET_MASK : '';
+      DOM.proxyPoolApiKey.placeholder = '';
+      DOM.proxyPoolApiKey.dataset.masked = d.proxy_pool_api_key_preview ? '1' : '0';
+      DOM.proxyPoolApiKey.dataset.dirty = '0';
     }
     if (DOM.proxyPoolCount) DOM.proxyPoolCount.value = d.proxy_pool_count || 1;
     if (DOM.proxyPoolCountry) DOM.proxyPoolCountry.value = d.proxy_pool_country || 'US';
@@ -810,6 +1011,7 @@ async function saveProxyPoolConfig() {
     }
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '代理池配置已保存';
     showToast('代理池配置已保存', 'success');
+    loadProxyPoolConfig();
   } catch (e) {
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = `保存失败: ${e.message}`;
     showToast(`保存失败: ${e.message}`, 'error');
@@ -870,8 +1072,10 @@ async function loadPoolConfig() {
 
     if (DOM.cpaBaseUrl) DOM.cpaBaseUrl.value = d.cpa_base_url || '';
     if (DOM.cpaToken) {
-      DOM.cpaToken.value = '';
-      if (d.cpa_token_preview) DOM.cpaToken.placeholder = d.cpa_token_preview;
+      DOM.cpaToken.value = d.cpa_token_preview ? SECRET_MASK : '';
+      DOM.cpaToken.placeholder = '';
+      DOM.cpaToken.dataset.masked = d.cpa_token_preview ? '1' : '0';
+      DOM.cpaToken.dataset.dirty = '0';
     }
     if (DOM.cpaMinCandidates) DOM.cpaMinCandidates.value = d.min_candidates || 800;
     if (DOM.cpaUsedPercent) DOM.cpaUsedPercent.value = d.used_percent_threshold || 95;
@@ -881,9 +1085,11 @@ async function loadPoolConfig() {
 }
 
 async function savePoolConfig() {
+  const tokenState = getSecretInputState(DOM.cpaToken);
   const payload = {
     cpa_base_url: (DOM.cpaBaseUrl?.value || '').trim(),
-    cpa_token: (DOM.cpaToken?.value || '').trim(),
+    cpa_token: tokenState.masked ? '' : tokenState.trimmed,
+    clear_cpa_token: tokenState.clear,
     min_candidates: num(DOM.cpaMinCandidates?.value, 800),
     used_percent_threshold: num(DOM.cpaUsedPercent?.value, 95),
     auto_maintain: !!DOM.cpaAutoMaintain?.checked,
@@ -905,6 +1111,7 @@ async function savePoolConfig() {
     if (DOM.cpaStatus) DOM.cpaStatus.textContent = '配置已保存';
     showToast('CPA 配置已保存', 'success');
     pollPoolStatus();
+    loadPoolConfig();
   } catch (e) {
     if (DOM.cpaStatus) DOM.cpaStatus.textContent = `保存失败: ${e.message}`;
     showToast(`保存失败: ${e.message}`, 'error');
@@ -1158,14 +1365,25 @@ async function loadMailConfig() {
       item.querySelectorAll('[data-key]').forEach((el) => {
         const key = el.dataset.key;
         const previewKey = `${key}_preview`;
+        const isSecret = SECRET_MAIL_KEYS.has(key);
         if (Object.prototype.hasOwnProperty.call(cfg, key)) {
           el.value = cfg[key] ?? '';
           el.placeholder = '';
+          el.dataset.masked = '0';
         } else if (cfg[previewKey]) {
-          el.value = '';
-          el.placeholder = cfg[previewKey];
+          if (isSecret) {
+            el.value = SECRET_MASK;
+            el.placeholder = '';
+            el.dataset.masked = '1';
+          } else {
+            el.value = '';
+            el.placeholder = cfg[previewKey];
+            el.dataset.masked = '0';
+          }
         } else {
+          el.value = '';
           el.placeholder = '';
+          el.dataset.masked = '0';
         }
         el.dataset.dirty = '0';
       });
@@ -1181,6 +1399,7 @@ async function loadMailConfig() {
           if (d.mail_config[key]) {
             el.value = d.mail_config[key];
             el.placeholder = '';
+            el.dataset.masked = '0';
           }
           el.dataset.dirty = '0';
         });
@@ -1203,8 +1422,11 @@ function collectMailPayload() {
 
     item.querySelectorAll('[data-key]').forEach((el) => {
       const key = el.dataset.key;
-      const val = String(el.value || '').trim();
+      const raw = String(el.value || '');
+      const val = raw.trim();
       const dirty = el.dataset.dirty === '1';
+      const masked = SECRET_MAIL_KEYS.has(key) && el.dataset.masked === '1' && raw === SECRET_MASK && !dirty;
+      if (masked) return;
       if (val || dirty) providerCfgs[name][key] = val;
     });
   });
@@ -1283,3 +1505,6 @@ function showToast(msg, type = 'info') {
     node.addEventListener('animationend', () => node.remove(), { once: true });
   }, 3200);
 }
+
+
+

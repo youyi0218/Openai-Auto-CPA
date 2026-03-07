@@ -1098,16 +1098,20 @@ class ProxyPoolConfigRequest(BaseModel):
     proxy_pool_api_url: str = "https://zenproxy.top/api/fetch"
     proxy_pool_auth_mode: str = "query"  # "header" | "query"
     proxy_pool_api_key: str = ""
+    clear_proxy_pool_api_key: bool = False
     proxy_pool_count: int = 1
     proxy_pool_country: str = "US"
 
 
 class ProxySaveRequest(BaseModel):
-    proxy: str
-    auto_register: bool = False
-    desired_token_count: int = 0
-    local_auto_maintain: bool = False
-    local_maintain_interval_minutes: int = 30
+    proxy: Optional[str] = None
+    auto_register: Optional[bool] = None
+    desired_token_count: Optional[int] = None
+    local_auto_maintain: Optional[bool] = None
+    local_maintain_interval_minutes: Optional[int] = None
+    multithread: Optional[bool] = None
+    thread_count: Optional[int] = None
+    local_probe_timeout_seconds: Optional[int] = None
 
 
 class SyncConfigRequest(BaseModel):
@@ -1125,8 +1129,10 @@ class SyncConfigRequest(BaseModel):
     thread_count: int = 3
     auto_register: bool = False
     desired_token_count: int = 0
+    proxy: Optional[str] = None
     local_auto_maintain: bool = False
     local_maintain_interval_minutes: int = 30
+    local_probe_timeout_seconds: Optional[int] = None
 
 
 class SyncNowRequest(BaseModel):
@@ -1227,15 +1233,34 @@ async def api_stop() -> Dict[str, str]:
 
 @app.post("/api/proxy/save")
 async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
-    _sync_config["proxy"] = req.proxy.strip()
-    _sync_config["auto_register"] = req.auto_register
-    _sync_config["desired_token_count"] = max(0, int(req.desired_token_count))
-    _sync_config["local_auto_maintain"] = bool(req.local_auto_maintain)
-    _sync_config["local_maintain_interval_minutes"] = max(5, int(req.local_maintain_interval_minutes))
+    local_related_changed = False
+
+    if req.proxy is not None:
+        _sync_config["proxy"] = req.proxy.strip()
+    if req.auto_register is not None:
+        _sync_config["auto_register"] = bool(req.auto_register)
+    if req.desired_token_count is not None:
+        _sync_config["desired_token_count"] = max(0, int(req.desired_token_count))
+    if req.multithread is not None:
+        _sync_config["multithread"] = bool(req.multithread)
+    if req.thread_count is not None:
+        _sync_config["thread_count"] = max(1, min(10, int(req.thread_count)))
+
+    if req.local_auto_maintain is not None:
+        _sync_config["local_auto_maintain"] = bool(req.local_auto_maintain)
+        local_related_changed = True
+    if req.local_maintain_interval_minutes is not None:
+        _sync_config["local_maintain_interval_minutes"] = max(5, int(req.local_maintain_interval_minutes))
+        local_related_changed = True
+    if req.local_probe_timeout_seconds is not None:
+        _sync_config["local_probe_timeout_seconds"] = max(5, min(60, int(req.local_probe_timeout_seconds)))
+        local_related_changed = True
+
     _save_sync_config(_sync_config)
-    _stop_local_auto_maintain()
-    if _sync_config.get("local_auto_maintain"):
-        _start_local_auto_maintain()
+    if local_related_changed:
+        _stop_local_auto_maintain()
+        if _sync_config.get("local_auto_maintain"):
+            _start_local_auto_maintain()
     return {"status": "saved"}
 
 
@@ -1245,8 +1270,11 @@ async def api_get_proxy() -> Dict[str, Any]:
         "proxy": _sync_config.get("proxy", ""),
         "auto_register": _sync_config.get("auto_register", False),
         "desired_token_count": _sync_config.get("desired_token_count", 0),
+        "multithread": _sync_config.get("multithread", False),
+        "thread_count": _sync_config.get("thread_count", 3),
         "local_auto_maintain": _sync_config.get("local_auto_maintain", False),
         "local_maintain_interval_minutes": _sync_config.get("local_maintain_interval_minutes", 30),
+        "local_probe_timeout_seconds": _sync_config.get("local_probe_timeout_seconds", 12),
     }
 
 
@@ -1383,6 +1411,7 @@ async def api_get_sync_config() -> Dict[str, Any]:
     cfg.setdefault("desired_token_count", 0)
     cfg.setdefault("local_auto_maintain", False)
     cfg.setdefault("local_maintain_interval_minutes", 30)
+    cfg.setdefault("local_probe_timeout_seconds", 12)
     cfg.setdefault("api_auth_enabled", False)
     return cfg
 
@@ -1428,7 +1457,9 @@ async def api_set_proxy_pool_config(req: ProxyPoolConfigRequest) -> Dict[str, An
         proxy_pool_api_url = default_url
 
     proxy_pool_api_key = req.proxy_pool_api_key.strip() if req.proxy_pool_api_key else ""
-    if not proxy_pool_api_key:
+    if req.clear_proxy_pool_api_key:
+        proxy_pool_api_key = ""
+    elif not proxy_pool_api_key:
         proxy_pool_api_key = str(_sync_config.get("proxy_pool_api_key", "") or "").strip()
 
     try:
@@ -1548,6 +1579,10 @@ async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
         "local_auto_maintain": bool(req.local_auto_maintain),
         "local_maintain_interval_minutes": max(5, req.local_maintain_interval_minutes),
     })
+    if req.proxy is not None:
+        _sync_config["proxy"] = req.proxy.strip()
+    if req.local_probe_timeout_seconds is not None:
+        _sync_config["local_probe_timeout_seconds"] = max(5, min(60, int(req.local_probe_timeout_seconds)))
     # ʷֶ
     _sync_config.pop("headful", None)
     _save_sync_config(_sync_config)
@@ -2400,6 +2435,7 @@ async def api_sync_batch(req: BatchSyncRequest) -> Dict[str, Any]:
 class PoolConfigRequest(BaseModel):
     cpa_base_url: str = ""
     cpa_token: str = ""
+    clear_cpa_token: bool = False
     min_candidates: int = 800
     used_percent_threshold: int = 95
     auto_maintain: bool = False
@@ -2432,7 +2468,9 @@ async def api_get_pool_config() -> Dict[str, Any]:
 async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
     global _sync_config
     _sync_config["cpa_base_url"] = req.cpa_base_url.strip()
-    if req.cpa_token.strip():
+    if req.clear_cpa_token:
+        _sync_config["cpa_token"] = ""
+    elif req.cpa_token.strip():
         _sync_config["cpa_token"] = req.cpa_token.strip()
     _sync_config["min_candidates"] = req.min_candidates
     _sync_config["used_percent_threshold"] = req.used_percent_threshold
@@ -2494,6 +2532,31 @@ async def api_pool_maintain() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         _pool_maintain_lock.release()
+
+
+@app.post("/api/local/maintain")
+async def api_local_maintain() -> Dict[str, Any]:
+    if not _local_maintain_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="local maintenance is already running")
+    try:
+        result = await run_in_threadpool(_maintain_local_tokens_sync)
+        _state.broadcast({
+            "ts": datetime.now().strftime("%H:%M:%S"),
+            "level": "info",
+            "message": (
+                f"[LOCAL] manual maintain: checked={result.get('checked', 0)}, "
+                f"invalid={result.get('invalid_count', 0)}, "
+                f"deleted={result.get('deleted_ok', 0)}, "
+                f"remaining={result.get('remaining', 0)}"
+            ),
+            "step": "local_maintain",
+        })
+        _try_local_auto_register(result.get("remaining", 0))
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _local_maintain_lock.release()
 
 
 @app.post("/api/pool/auto")

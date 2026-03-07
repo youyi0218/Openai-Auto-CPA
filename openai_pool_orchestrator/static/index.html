@@ -299,6 +299,41 @@
 
           <article class="card collapsible open">
             <div class="collapsible-trigger card-head">
+              <h3>自动注册账号</h3>
+              <span class="collapse-icon">⌄</span>
+            </div>
+            <div class="collapsible-body">
+              <label class="checkbox-row" for="autoRegisterCfgEnabled">
+                <input type="checkbox" id="autoRegisterCfgEnabled" />
+                <span>池数量不足时自动补号</span>
+              </label>
+              <div class="card-grid two compact">
+                <div class="form-row compact">
+                  <label for="autoRegisterCfgProxy">注册代理</label>
+                  <input type="text" id="autoRegisterCfgProxy" placeholder="http://127.0.0.1:7897" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="form-row compact">
+                  <label for="autoRegisterCfgDesired">期望账号数量</label>
+                  <input type="number" id="autoRegisterCfgDesired" value="0" min="0" />
+                </div>
+                <label class="checkbox-row" for="autoRegisterCfgMultithread">
+                  <input type="checkbox" id="autoRegisterCfgMultithread" />
+                  <span>多线程补号</span>
+                </label>
+                <div class="form-row compact">
+                  <label for="autoRegisterCfgThreads">线程数</label>
+                  <input type="number" id="autoRegisterCfgThreads" value="3" min="1" max="10" />
+                </div>
+              </div>
+              <div class="inline-actions">
+                <button id="autoRegisterCfgSaveBtn" class="btn btn-primary" type="button">保存自动注册配置</button>
+              </div>
+              <p id="autoRegisterCfgStatus" class="inline-status"></p>
+            </div>
+          </article>
+
+          <article class="card collapsible open">
+            <div class="collapsible-trigger card-head">
               <h3>上传策略</h3>
               <span class="collapse-icon">⌄</span>
             </div>
@@ -319,6 +354,34 @@
         </div>
 
         <div class="card-grid two">
+          <article class="card collapsible open">
+            <div class="collapsible-trigger card-head">
+              <h3>自动测活保活</h3>
+              <span class="collapse-icon">⌄</span>
+            </div>
+            <div class="collapsible-body">
+              <label class="checkbox-row" for="autoMaintainCfgEnabled">
+                <input type="checkbox" id="autoMaintainCfgEnabled" />
+                <span>开启本地账号定时测活</span>
+              </label>
+              <div class="card-grid two compact">
+                <div class="form-row compact">
+                  <label for="autoMaintainCfgInterval">测活间隔(分钟)</label>
+                  <input type="number" id="autoMaintainCfgInterval" value="30" min="5" />
+                </div>
+                <div class="form-row compact">
+                  <label for="autoMaintainCfgProbeTimeout">探测超时(秒)</label>
+                  <input type="number" id="autoMaintainCfgProbeTimeout" value="12" min="5" max="60" />
+                </div>
+              </div>
+              <div class="inline-actions">
+                <button id="autoMaintainRunBtn" class="btn btn-ghost" type="button">立即执行一次</button>
+                <button id="autoMaintainCfgSaveBtn" class="btn btn-primary" type="button">保存保活配置</button>
+              </div>
+              <p id="autoMaintainCfgStatus" class="inline-status"></p>
+            </div>
+          </article>
+
           <article class="card collapsible open">
             <div class="collapsible-trigger card-head">
               <h3>请求代理池</h3>
