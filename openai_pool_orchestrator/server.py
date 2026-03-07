@@ -2548,8 +2548,14 @@ async def api_set_mail_config(req: MailConfigRequest) -> Dict[str, Any]:
     _sync_config["mail_provider"] = req.mail_provider.strip() or "mailtm"
     existing = _sync_config.get("mail_config") or {}
     for k, v in req.mail_config.items():
-        if v.strip():
-            existing[k] = v.strip()
+        key = str(k).strip()
+        if not key:
+            continue
+        val = str(v or "").strip()
+        if val:
+            existing[key] = val
+        else:
+            existing.pop(key, None)
     _sync_config["mail_config"] = existing
 
     # ¶ṩ̸ʽ
@@ -2563,8 +2569,14 @@ async def api_set_mail_config(req: MailConfigRequest) -> Dict[str, Any]:
         if pname not in existing_configs:
             existing_configs[pname] = {}
         for k, v in pcfg.items():
-            if v.strip():
-                existing_configs[pname][k] = v.strip()
+            key = str(k).strip()
+            if not key:
+                continue
+            val = str(v or "").strip()
+            if val:
+                existing_configs[pname][key] = val
+            else:
+                existing_configs[pname].pop(key, None)
     _sync_config["mail_provider_configs"] = existing_configs
 
     _save_sync_config(_sync_config)

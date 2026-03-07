@@ -33,6 +33,8 @@ document.addEventListener('DOMContentLoaded', init);
 function init() {
   mapDom();
   initApiKey();
+  initPasswordToggles();
+  initMailFieldDirtyTracking();
   initNav();
   initCollapsible();
   initTheme();
@@ -119,6 +121,40 @@ function esc(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&
 function cssEsc(v) { return String(v ?? '').replace(/[^a-zA-Z0-9_-]/g, '_'); }
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function numOrNull(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+
+function initPasswordToggles() {
+  document.querySelectorAll('input[type="password"]').forEach((input) => {
+    if (input.dataset.eyeReady === '1') return;
+    const wrap = document.createElement('div');
+    wrap.className = 'password-wrap';
+    input.parentNode?.insertBefore(wrap, input);
+    wrap.appendChild(input);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'password-toggle';
+    btn.textContent = '显示';
+    btn.addEventListener('click', () => {
+      const visible = input.type === 'text';
+      input.type = visible ? 'password' : 'text';
+      btn.textContent = visible ? '显示' : '隐藏';
+      input.focus();
+    });
+    wrap.appendChild(btn);
+    input.dataset.eyeReady = '1';
+  });
+}
+
+function initMailFieldDirtyTracking() {
+  document.querySelectorAll('.provider-item [data-key]').forEach((el) => {
+    if (el.dataset.dirtyBind === '1') return;
+    const markDirty = () => { el.dataset.dirty = '1'; };
+    el.addEventListener('input', markDirty);
+    el.addEventListener('change', markDirty);
+    el.dataset.dirtyBind = '1';
+    if (!el.dataset.dirty) el.dataset.dirty = '0';
+  });
+}
 
 function initApiKey() {
   try { state.apiKey = localStorage.getItem(API_KEY_STORAGE) || ''; } catch { state.apiKey = ''; }
@@ -1122,8 +1158,16 @@ async function loadMailConfig() {
       item.querySelectorAll('[data-key]').forEach((el) => {
         const key = el.dataset.key;
         const previewKey = `${key}_preview`;
-        if (Object.prototype.hasOwnProperty.call(cfg, key)) el.value = cfg[key] ?? '';
-        else if (cfg[previewKey]) el.placeholder = cfg[previewKey];
+        if (Object.prototype.hasOwnProperty.call(cfg, key)) {
+          el.value = cfg[key] ?? '';
+          el.placeholder = '';
+        } else if (cfg[previewKey]) {
+          el.value = '';
+          el.placeholder = cfg[previewKey];
+        } else {
+          el.placeholder = '';
+        }
+        el.dataset.dirty = '0';
       });
     });
 
@@ -1134,7 +1178,11 @@ async function loadMailConfig() {
       if (item) {
         item.querySelectorAll('[data-key]').forEach((el) => {
           const key = el.dataset.key;
-          if (d.mail_config[key]) el.value = d.mail_config[key];
+          if (d.mail_config[key]) {
+            el.value = d.mail_config[key];
+            el.placeholder = '';
+          }
+          el.dataset.dirty = '0';
         });
       }
     }
@@ -1156,7 +1204,8 @@ function collectMailPayload() {
     item.querySelectorAll('[data-key]').forEach((el) => {
       const key = el.dataset.key;
       const val = String(el.value || '').trim();
-      if (val) providerCfgs[name][key] = val;
+      const dirty = el.dataset.dirty === '1';
+      if (val || dirty) providerCfgs[name][key] = val;
     });
   });
 
@@ -1191,6 +1240,7 @@ async function saveMailConfig() {
     }
     if (DOM.mailStatus) DOM.mailStatus.textContent = '配置已保存';
     showToast('邮箱配置已保存', 'success');
+    loadMailConfig();
   } catch (e) {
     if (DOM.mailStatus) DOM.mailStatus.textContent = `保存失败: ${e.message}`;
     showToast(`保存失败: ${e.message}`, 'error');

@@ -23,7 +23,9 @@ services:
     ports:
       - "8317:8317"
     volumes:
+      # Compatible with different CLIProxyAPI image versions.
       - ./deploy/cpa/config.yaml:/app/config.yaml:ro
+      - ./deploy/cpa/config.yaml:/CLIProxyAPI/config.yaml:ro
       - ./deploy/cpa/auth:/root/.cli-proxy-api
     labels:
       - com.centurylinklabs.watchtower.enable=true
