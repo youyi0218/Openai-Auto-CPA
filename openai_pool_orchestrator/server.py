@@ -5,10 +5,12 @@ FastAPI ˷
 
 import asyncio
 import base64
+import hmac
 import json
 import os
 import queue
 import random
+import secrets
 import threading
 import time
 import urllib.request
@@ -20,9 +22,9 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -90,6 +92,8 @@ def _load_sync_config() -> Dict[str, str]:
         "local_auto_maintain": False,
         "local_maintain_interval_minutes": 30,
         "local_probe_timeout_seconds": 12,
+        "api_auth_enabled": False,
+        "x_api_key": "",
     }
 
 
@@ -170,6 +174,8 @@ def _normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         cfg["local_probe_timeout_seconds"] = max(5, min(int(cfg.get("local_probe_timeout_seconds", 12)), 60))
     except (TypeError, ValueError):
         cfg["local_probe_timeout_seconds"] = 12
+    cfg["api_auth_enabled"] = bool(cfg.get("api_auth_enabled", False))
+    cfg["x_api_key"] = str(cfg.get("x_api_key", "") or "").strip()
     return cfg
 
 
@@ -196,6 +202,53 @@ def _save_sync_config(cfg: Dict[str, str]) -> None:
 
 
 _sync_config = _normalize_config(_load_sync_config())
+
+
+def _mask_secret(value: str, keep: int = 6) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if len(raw) <= keep:
+        return raw
+    return raw[:keep] + "..."
+
+
+def _env_api_key() -> str:
+    return str(os.getenv("X_API_KEY", "") or "").strip()
+
+
+def _configured_api_key() -> str:
+    return str(_sync_config.get("x_api_key", "") or "").strip()
+
+
+def _effective_api_key() -> str:
+    env = _env_api_key()
+    if env:
+        return env
+    return _configured_api_key()
+
+
+def _is_api_auth_enabled() -> bool:
+    if _env_api_key():
+        return True
+    return bool(_sync_config.get("api_auth_enabled", False) and _configured_api_key())
+
+
+def _extract_request_api_key(request: Request) -> str:
+    x_api_key = request.headers.get("x-api-key", "").strip()
+    if x_api_key:
+        return x_api_key
+    auth_header = request.headers.get("authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    query_key = request.query_params.get("api_key", "").strip()
+    if query_key:
+        return query_key
+    return ""
+
+
+def _generate_api_key() -> str:
+    return secrets.token_urlsafe(32)
 
 
 def _push_refresh_token(base_url: str, bearer: str, refresh_token: str) -> Dict[str, Any]:
@@ -312,6 +365,31 @@ def _save_state(success: int, fail: int) -> None:
 # ==========================================
 
 app = FastAPI(title="OpenAI Pool Orchestrator", version=__version__)
+
+
+@app.middleware("http")
+async def api_key_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if path == "/api/auth/status":
+        return await call_next(request)
+    if not _is_api_auth_enabled():
+        return await call_next(request)
+
+    expected = _effective_api_key()
+    provided = _extract_request_api_key(request)
+    if provided and hmac.compare_digest(provided, expected):
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=401,
+        content={
+            "detail": "Unauthorized: provide API key via Authorization Bearer or X-API-Key",
+        },
+    )
 
 # STATIC_DIR  TOKENS_DIR ѴӰ __init__.py 
 STATIC_DIR.mkdir(exist_ok=True)
@@ -1059,6 +1137,69 @@ class UploadModeRequest(BaseModel):
     upload_mode: str = "snapshot"  # "snapshot" | "decoupled"
 
 
+class ApiAuthConfigRequest(BaseModel):
+    enabled: bool = False
+    api_key: str = ""
+    regenerate: bool = False
+
+
+@app.get("/api/auth/status")
+async def api_auth_status() -> Dict[str, Any]:
+    env_key = _env_api_key()
+    configured_key = _configured_api_key()
+    effective_key = _effective_api_key()
+    return {
+        "enabled": _is_api_auth_enabled(),
+        "source": "env" if env_key else "config",
+        "env_override": bool(env_key),
+        "api_auth_enabled": bool(_sync_config.get("api_auth_enabled", False)),
+        "configured": bool(effective_key),
+        "api_key_preview": _mask_secret(effective_key, 8),
+        "configured_key_preview": _mask_secret(configured_key, 8),
+        "accept": [
+            "Authorization: Bearer <api_key>",
+            "X-API-Key: <api_key>",
+            "query ?api_key=<api_key> (SSE)",
+        ],
+    }
+
+
+@app.post("/api/auth/config")
+async def api_set_auth_config(req: ApiAuthConfigRequest) -> Dict[str, Any]:
+    if _env_api_key():
+        raise HTTPException(status_code=409, detail="X_API_KEY 环境变量已生效，不能通过页面修改")
+
+    enabled = bool(req.enabled)
+    new_key = str(req.api_key or "").strip()
+    current = _configured_api_key()
+
+    if req.regenerate:
+        new_key = _generate_api_key()
+    elif enabled and not new_key and not current:
+        new_key = _generate_api_key()
+
+    if enabled and not new_key and not current:
+        raise HTTPException(status_code=400, detail="启用鉴权前请填写 API Key")
+
+    if new_key:
+        _sync_config["x_api_key"] = new_key
+    elif not enabled:
+        _sync_config["x_api_key"] = current
+
+    if enabled and not _configured_api_key():
+        raise HTTPException(status_code=400, detail="启用鉴权前请填写 API Key")
+
+    _sync_config["api_auth_enabled"] = enabled
+    _save_sync_config(_sync_config)
+
+    return {
+        "status": "saved",
+        "enabled": _is_api_auth_enabled(),
+        "api_key": new_key,
+        "api_key_preview": _mask_secret(_effective_api_key(), 8),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     html_path = STATIC_DIR / "index.html"
@@ -1210,6 +1351,9 @@ async def api_get_sync_config() -> Dict[str, Any]:
         (proxy_pool_api_key[:8] + "...") if len(proxy_pool_api_key) > 8 else (proxy_pool_api_key or "")
     )
     cfg["proxy_pool_api_key"] = ""
+    x_api_key = str(cfg.get("x_api_key", ""))
+    cfg["x_api_key_preview"] = _mask_secret(x_api_key, 8)
+    cfg["x_api_key"] = ""
     #  mail_provider_configs
     raw_configs = cfg.get("mail_provider_configs") or {}
     safe_configs: Dict[str, Dict] = {}
@@ -1239,6 +1383,7 @@ async def api_get_sync_config() -> Dict[str, Any]:
     cfg.setdefault("desired_token_count", 0)
     cfg.setdefault("local_auto_maintain", False)
     cfg.setdefault("local_maintain_interval_minutes", 30)
+    cfg.setdefault("api_auth_enabled", False)
     return cfg
 
 

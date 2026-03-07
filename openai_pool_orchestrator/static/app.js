@@ -1,1228 +1,906 @@
-/**
- * OpenAI Pool Orchestrator 前端交互逻辑 v5.0
- */
 
-// ==========================================
-// 状态
-// ==========================================
+const $ = (id) => document.getElementById(id);
+const DOM = {};
 const state = {
-  status: 'idle',          // idle | running | stopping
-  successCount: 0,
-  failCount: 0,
-  logCount: 0,
+  status: 'idle',
   autoScroll: true,
-  currentSteps: {},        // step 当前状态
+  logCount: 0,
+  currentSteps: {},
   eventSource: null,
+  countdownTimer: null,
   tokens: [],
   tokenSummary: {},
-  tokenFilter: {
-    status: 'all',
-    keyword: '',
-  },
-  stepsInRun: false,       // 是否处于本轮步骤追踪中（避免多线程 start 互相清空）
+  tokenFilter: { status: 'all', keyword: '' },
+  apiKey: '',
+  authWarned: false,
 };
 
-// ==========================================
-// DOM 引用
-// ==========================================
-const $ = id => document.getElementById(id);
-const DOM = {};
-
 const STEPS = [
-  { id: 'check_proxy', label: '网络检测' },
-  { id: 'create_email', label: '创建邮箱' },
-  { id: 'oauth_init', label: 'OAuth 初始化' },
-  { id: 'sentinel', label: 'Sentinel Token' },
-  { id: 'signup', label: '提交注册' },
-  { id: 'send_otp', label: '发验证码' },
-  { id: 'wait_otp', label: '等待验证码' },
-  { id: 'verify_otp', label: '验证 OTP' },
-  { id: 'create_account', label: '创建账户' },
-  { id: 'workspace', label: '选择 Workspace' },
-  { id: 'get_token', label: '获取 Token' },
+  ['check_proxy', '检测代理'], ['create_email', '创建邮箱'], ['oauth_init', 'OAuth 初始化'], ['sentinel', 'Sentinel Token'],
+  ['signup', '提交注册'], ['send_otp', '发送验证码'], ['wait_otp', '等待验证码'], ['verify_otp', '验证 OTP'],
+  ['create_account', '创建账号'], ['workspace', '选择 Workspace'], ['get_token', '获取 Token'],
 ];
 
-// ==========================================
-// 初始化
-// ==========================================
-document.addEventListener('DOMContentLoaded', () => {
-  Object.assign(DOM, {
-    statusBadge: $('statusBadge'),
-    statusText: $('statusText'),
-    statusDot: $('statusDot'),
-    proxyInput: $('proxyInput'),
-    checkProxyBtn: $('checkProxyBtn'),
-    proxyStatus: $('proxyStatus'),
-    btnStart: $('btnStart'),
-    btnStop: $('btnStop'),
-    statSuccess: $('statSuccess'),
-    statFail: $('statFail'),
-    statTotal: $('statTotal'),
-    logBody: $('logBody'),
-    logCount: $('logCount'),
-    clearLogBtn: $('clearLogBtn'),
-    progressFill: $('progressFill'),
-    stepsTracker: $('stepsTracker'),
-    segmentIndicator: $('segmentIndicator'),
-    autoScrollCheck: $('autoScrollCheck'),
-    // 多线程
-    multithreadCheck: $('multithreadCheck'),
-    threadCountInput: $('threadCountInput'),
-    // Sub2Api
-    sub2apiBaseUrl: $('sub2apiBaseUrl'),
-    sub2apiEmail: $('sub2apiEmail'),
-    sub2apiPassword: $('sub2apiPassword'),
-    autoSyncCheck: $('autoSyncCheck'),
-    uploadMode: $('uploadMode'),
-    uploadModeSaveBtn: $('uploadModeSaveBtn'),
-    uploadModeStatus: $('uploadModeStatus'),
-    saveSyncConfigBtn: $('saveSyncConfigBtn'),
-    syncStatus: $('syncStatus'),
-    // Header 池状态
-    headerSub2apiChip: $('headerSub2apiChip'),
-    headerSub2apiLabel: $('headerSub2apiLabel'),
-    headerSub2apiDelta: $('headerSub2apiDelta'),
-    headerSub2apiBar: $('headerSub2apiBar'),
-    headerCpaChip: $('headerCpaChip'),
-    headerCpaLabel: $('headerCpaLabel'),
-    headerCpaDelta: $('headerCpaDelta'),
-    headerCpaBar: $('headerCpaBar'),
-    themeToggleBtn: $('themeToggleBtn'),
-    // CPA config
-    cpaBaseUrl: $('cpaBaseUrl'),
-    cpaToken: $('cpaToken'),
-    cpaMinCandidates: $('cpaMinCandidates'),
-    cpaUsedPercent: $('cpaUsedPercent'),
-    cpaAutoMaintain: $('cpaAutoMaintain'),
-    cpaInterval: $('cpaInterval'),
-    cpaTestBtn: $('cpaTestBtn'),
-    cpaSaveBtn: $('cpaSaveBtn'),
-    cpaStatus: $('cpaStatus'),
-    // Mail config（多选）
-    mailStrategySelect: $('mailStrategySelect'),
-    mailTestBtn: $('mailTestBtn'),
-    mailSaveBtn: $('mailSaveBtn'),
-    mailStatus: $('mailStatus'),
-    // Pool tab ?CPA
-    poolTotal: $('poolTotal'),
-    poolCandidates: $('poolCandidates'),
-    poolError: $('poolError'),
-    poolThreshold: $('poolThreshold'),
-    poolPercent: $('poolPercent'),
-    poolRefreshBtn: $('poolRefreshBtn'),
-    poolMaintainBtn: $('poolMaintainBtn'),
-    poolMaintainStatus: $('poolMaintainStatus'),
-    poolTokenList: $('poolTokenList'),
-    poolTokenCount: $('poolTokenCount'),
-    poolCopyRtBtn: $('poolCopyRtBtn'),
-    poolPwSyncBtn: $('poolPwSyncBtn'),
-    tokenFilterStatus: $('tokenFilterStatus'),
-    tokenFilterKeyword: $('tokenFilterKeyword'),
-    tokenFilterApplyBtn: $('tokenFilterApplyBtn'),
-    tokenFilterResetBtn: $('tokenFilterResetBtn'),
-    // Pool tab ?Sub2Api
-    sub2apiPoolTotal: $('sub2apiPoolTotal'),
-    sub2apiPoolNormal: $('sub2apiPoolNormal'),
-    sub2apiPoolError: $('sub2apiPoolError'),
-    sub2apiPoolThreshold: $('sub2apiPoolThreshold'),
-    sub2apiPoolPercent: $('sub2apiPoolPercent'),
-    sub2apiPoolRefreshBtn: $('sub2apiPoolRefreshBtn'),
-    sub2apiPoolMaintainBtn: $('sub2apiPoolMaintainBtn'),
-    sub2apiPoolMaintainStatus: $('sub2apiPoolMaintainStatus'),
-    // Sub2Api config maintenance fields
-    sub2apiMinCandidates: $('sub2apiMinCandidates'),
-    sub2apiInterval: $('sub2apiInterval'),
-    sub2apiAutoMaintain: $('sub2apiAutoMaintain'),
-    sub2apiTestPoolBtn: $('sub2apiTestPoolBtn'),
-    proxyPoolEnabled: $('proxyPoolEnabled'),
-    proxyPoolProvider: $('proxyPoolProvider'),
-    proxyPoolApiUrlLabel: $('proxyPoolApiUrlLabel'),
-    proxyPoolApiUrl: $('proxyPoolApiUrl'),
-    proxyPoolZenAuthRow: $('proxyPoolZenAuthRow'),
-    proxyPoolZenFilterRow: $('proxyPoolZenFilterRow'),
-    proxyPoolAuthMode: $('proxyPoolAuthMode'),
-    proxyPoolApiKey: $('proxyPoolApiKey'),
-    proxyPoolCount: $('proxyPoolCount'),
-    proxyPoolCountry: $('proxyPoolCountry'),
-    proxyPoolTestBtn: $('proxyPoolTestBtn'),
-    proxyPoolSaveBtn: $('proxyPoolSaveBtn'),
-    proxyPoolStatus: $('proxyPoolStatus'),
-    // 代理保存 & 自动注册
-    saveProxyBtn: $('saveProxyBtn'),
-    autoRegisterCheck: $('autoRegisterCheck'),
-    expectedTokenCountInput: $('expectedTokenCountInput'),
-    localAutoMaintainCheck: $('localAutoMaintainCheck'),
-    localMaintainIntervalInput: $('localMaintainIntervalInput'),
-    poolRecentTokenTotal: $('poolRecentTokenTotal'),
-  });
+const VIEW_TITLES = { viewDashboard: '仪表盘', viewPool: '账号池', viewConfig: '系统配置' };
+const TOAST_ICONS = { info: 'i', success: '✓', warn: '!', error: '×' };
+const LEVEL_ICONS = { connected: '*', info: 'i', success: '✓', warn: '!', error: '×', token_saved: '+', sync_ok: '↗' };
+const THEME_KEY = 'oai_auto_cpa_theme_v1';
+const API_KEY_STORAGE = 'oai_auto_cpa_api_key_v1';
+const rawFetch = window.fetch.bind(window);
 
+document.addEventListener('DOMContentLoaded', init);
+
+function init() {
+  mapDom();
+  initApiKey();
+  initNav();
+  initCollapsible();
+  initTheme();
+  initMailCheckboxes();
+  bindEvents();
   renderSteps();
   connectSSE();
-  loadTokens();
-  updateStatus();
-  loadSyncConfig();
-  applyProxyPoolProviderUI(DOM.proxyPoolProvider ? DOM.proxyPoolProvider.value : 'zenproxy_api', false);
-  loadProxyPoolConfig();
-  loadPoolConfig();
-  loadMailConfig();
-  initMailCheckboxes();
-  pollPoolStatus();
-  pollSub2ApiPoolStatus();
-  initThemeSwitch();
 
-  // 折叠面板
-  initCollapsibles();
+  Promise.allSettled([
+    loadApiAuthStatus(), updateStatus(), loadTokens(), loadSyncConfig(), loadProxyPoolConfig(), loadPoolConfig(), loadMailConfig(), pollPoolStatus(), pollSub2ApiPoolStatus(),
+  ]);
 
-  // 控制中心事件
-  DOM.checkProxyBtn.addEventListener('click', checkProxy);
-  if (DOM.saveProxyBtn) DOM.saveProxyBtn.addEventListener('click', saveProxy);
-  DOM.btnStart.addEventListener('click', startTask);
-  DOM.btnStop.addEventListener('click', stopTask);
-  DOM.clearLogBtn.addEventListener('click', clearLog);
-
-  // 服务配置事件
-  DOM.saveSyncConfigBtn.addEventListener('click', saveSyncConfig);
-  if (DOM.uploadModeSaveBtn) DOM.uploadModeSaveBtn.addEventListener('click', saveUploadMode);
-  DOM.cpaTestBtn.addEventListener('click', testCpaConnection);
-  DOM.cpaSaveBtn.addEventListener('click', savePoolConfig);
-  DOM.mailTestBtn.addEventListener('click', testMailConnection);
-  DOM.mailSaveBtn.addEventListener('click', saveMailConfig);
-
-  // 账号池事件（CPA）
-  DOM.poolRefreshBtn.addEventListener('click', pollPoolStatus);
-  DOM.poolMaintainBtn.addEventListener('click', triggerMaintenance);
-  if (DOM.poolCopyRtBtn) DOM.poolCopyRtBtn.addEventListener('click', copyAllRt);
-  if (DOM.poolPwSyncBtn) DOM.poolPwSyncBtn.addEventListener('click', batchSync);
-  if (DOM.tokenFilterApplyBtn) DOM.tokenFilterApplyBtn.addEventListener('click', applyTokenFilter);
-  if (DOM.tokenFilterResetBtn) DOM.tokenFilterResetBtn.addEventListener('click', resetTokenFilter);
-  if (DOM.tokenFilterKeyword) {
-    DOM.tokenFilterKeyword.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') applyTokenFilter();
-    });
-  }
-  // 账号池事件（Sub2Api）
-  if (DOM.sub2apiPoolRefreshBtn) DOM.sub2apiPoolRefreshBtn.addEventListener('click', pollSub2ApiPoolStatus);
-  if (DOM.sub2apiPoolMaintainBtn) DOM.sub2apiPoolMaintainBtn.addEventListener('click', triggerSub2ApiMaintenance);
-  if (DOM.sub2apiTestPoolBtn) DOM.sub2apiTestPoolBtn.addEventListener('click', testSub2ApiPoolConnection);
-  if (DOM.proxyPoolTestBtn) DOM.proxyPoolTestBtn.addEventListener('click', testProxyPoolFetch);
-  if (DOM.proxyPoolSaveBtn) DOM.proxyPoolSaveBtn.addEventListener('click', saveProxyPoolConfig);
-  if (DOM.proxyPoolProvider) DOM.proxyPoolProvider.addEventListener('change', onProxyPoolProviderChange);
-
-  // Token 列表事件委托
-  if (DOM.poolTokenList) {
-    DOM.poolTokenList.addEventListener('click', async (e) => {
-      const copyBtn = e.target.closest('.token-copy-btn');
-      if (copyBtn) {
-        try {
-          const payload = decodeURIComponent(copyBtn.dataset.payload || '');
-          await copyToken(payload);
-        } catch { showToast('复制失败', 'error'); }
-        return;
-      }
-      const deleteBtn = e.target.closest('.token-delete-btn');
-      if (deleteBtn) {
-        const filename = decodeURIComponent(deleteBtn.dataset.filename || '');
-        if (filename) deleteToken(filename);
-      }
-    });
-  }
-
-  DOM.logBody.addEventListener('scroll', () => {
-    const el = DOM.logBody;
-    const isAtBottom = (el.scrollTop + el.clientHeight >= el.scrollHeight - 20);
-    state.autoScroll = isAtBottom;
-    if (DOM.autoScrollCheck) DOM.autoScrollCheck.checked = isAtBottom;
-  });
-
-  // 自动滚动开关
-  if (DOM.autoScrollCheck) {
-    DOM.autoScrollCheck.addEventListener('change', () => {
-      state.autoScroll = DOM.autoScrollCheck.checked;
-      if (state.autoScroll) DOM.logBody.scrollTop = DOM.logBody.scrollHeight;
-    });
-  }
-
-  setInterval(updateStatus, 5000);
-  setInterval(loadTokens, 60000);
+  setInterval(updateStatus, 3000);
+  setInterval(loadTokens, 30000);
   setInterval(pollPoolStatus, 30000);
   setInterval(pollSub2ApiPoolStatus, 30000);
+}
 
-  // Tab 导航
-  initTabs();
-});
+function mapDom() {
+  [
+    'pageTitle','statusBadge','statusText','themeToggleBtn',
+    'headerSub2apiChip','headerSub2apiLabel','headerSub2apiDelta','headerSub2apiBar','headerCpaChip','headerCpaLabel','headerCpaDelta','headerCpaBar',
+    'proxyInput','checkProxyBtn','saveProxyBtn','proxyStatus','multithreadCheck','threadCountInput','autoRegisterCheck','expectedTokenCountInput','localAutoMaintainCheck','localMaintainIntervalInput','btnStart','btnStop',
+    'statSuccess','statFail','statTotal','progressFill','stepsTracker','autoScrollCheck','logBody','logCount','clearLogBtn',
+    'sub2apiPoolTotal','sub2apiPoolNormal','sub2apiPoolError','sub2apiPoolThreshold','sub2apiPoolPercent','sub2apiPoolRefreshBtn','sub2apiPoolMaintainBtn','sub2apiPoolMaintainStatus',
+    'poolTotal','poolCandidates','poolError','poolThreshold','poolPercent','poolRefreshBtn','poolMaintainBtn','poolMaintainStatus',
+    'poolTokenCount','poolRecentTokenTotal','poolCopyRtBtn','poolPwSyncBtn','tokenFilterStatus','tokenFilterKeyword','tokenFilterApplyBtn','tokenFilterResetBtn','poolTokenList',
+    'sub2apiBaseUrl','sub2apiEmail','sub2apiPassword','autoSyncCheck','sub2apiMinCandidates','sub2apiAutoMaintain','sub2apiInterval','sub2apiTestPoolBtn','saveSyncConfigBtn','syncStatus',
+    'uploadMode','uploadModeSaveBtn','uploadModeStatus',
+    'proxyPoolEnabled','proxyPoolProvider','proxyPoolApiUrlLabel','proxyPoolApiUrl','proxyPoolZenAuthRow','proxyPoolZenFilterRow','proxyPoolAuthMode','proxyPoolApiKey','proxyPoolCount','proxyPoolCountry','proxyPoolTestBtn','proxyPoolSaveBtn','proxyPoolStatus',
+    'cpaBaseUrl','cpaToken','cpaMinCandidates','cpaUsedPercent','cpaAutoMaintain','cpaInterval','cpaTestBtn','cpaSaveBtn','cpaStatus',
+    'apiAuthEnabled','apiAuthKeyInput','apiAuthApplyBtn','apiAuthSaveBtn','apiAuthStatus',
+    'mailStrategySelect','mailTestBtn','mailSaveBtn','mailStatus',
+  ].forEach((id) => DOM[id] = $(id));
+}
 
-// ==========================================
-// Tab 导航切换（iOS Segmented Control）
-// ==========================================
-function initTabs() {
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabPanels = document.querySelectorAll('.tab-panel');
-  const indicator = DOM.segmentIndicator;
+function bindEvents() {
+  on(DOM.checkProxyBtn, 'click', checkProxy);
+  on(DOM.saveProxyBtn, 'click', saveProxy);
+  on(DOM.btnStart, 'click', startTask);
+  on(DOM.btnStop, 'click', stopTask);
+  on(DOM.clearLogBtn, 'click', clearLog);
+  on(DOM.autoScrollCheck, 'change', () => state.autoScroll = !!DOM.autoScrollCheck.checked);
 
-  tabBtns.forEach((btn, index) => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
-      tabPanels.forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      btn.setAttribute('aria-selected', 'true');
-      document.getElementById(btn.dataset.tab).classList.add('active');
+  on(DOM.poolRefreshBtn, 'click', pollPoolStatus);
+  on(DOM.poolMaintainBtn, 'click', triggerMaintenance);
+  on(DOM.sub2apiPoolRefreshBtn, 'click', pollSub2ApiPoolStatus);
+  on(DOM.sub2apiPoolMaintainBtn, 'click', triggerSub2ApiMaintenance);
 
-      // 滑动分段指示器
-      if (indicator) {
-        indicator.setAttribute('data-active', String(index));
-      }
+  on(DOM.poolCopyRtBtn, 'click', copyAllRt);
+  on(DOM.poolPwSyncBtn, 'click', batchSync);
+  on(DOM.tokenFilterApplyBtn, 'click', applyTokenFilter);
+  on(DOM.tokenFilterResetBtn, 'click', resetTokenFilter);
+  on(DOM.tokenFilterKeyword, 'keydown', (e) => e.key === 'Enter' && applyTokenFilter());
+
+  on(DOM.saveSyncConfigBtn, 'click', saveSyncConfig);
+  on(DOM.uploadModeSaveBtn, 'click', saveUploadMode);
+
+  on(DOM.proxyPoolProvider, 'change', onProxyPoolProviderChange);
+  on(DOM.proxyPoolTestBtn, 'click', testProxyPoolFetch);
+  on(DOM.proxyPoolSaveBtn, 'click', saveProxyPoolConfig);
+
+  on(DOM.cpaSaveBtn, 'click', savePoolConfig);
+  on(DOM.cpaTestBtn, 'click', testCpaConnection);
+  on(DOM.sub2apiTestPoolBtn, 'click', testSub2ApiPoolConnection);
+  on(DOM.apiAuthApplyBtn, 'click', applyApiKeyToSession);
+  on(DOM.apiAuthSaveBtn, 'click', saveApiAuthConfig);
+
+  on(DOM.mailSaveBtn, 'click', saveMailConfig);
+  on(DOM.mailTestBtn, 'click', testMailConnection);
+
+  if (DOM.poolTokenList) {
+    DOM.poolTokenList.addEventListener('click', async (e) => {
+      const cp = e.target.closest('.token-copy-btn');
+      if (cp) return copyToken(decodeURIComponent(cp.dataset.payload || ''));
+      const dl = e.target.closest('.token-delete-btn');
+      if (dl) return deleteToken(decodeURIComponent(dl.dataset.filename || ''));
     });
+  }
+}
+
+function on(el, evt, fn) { if (el) el.addEventListener(evt, fn); }
+function esc(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;'); }
+function cssEsc(v) { return String(v ?? '').replace(/[^a-zA-Z0-9_-]/g, '_'); }
+function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function numOrNull(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+
+function initApiKey() {
+  try { state.apiKey = localStorage.getItem(API_KEY_STORAGE) || ''; } catch { state.apiKey = ''; }
+  if (DOM.apiAuthKeyInput && state.apiKey) DOM.apiAuthKeyInput.value = state.apiKey;
+}
+
+function setApiKey(key) {
+  state.apiKey = String(key || '').trim();
+  try {
+    if (state.apiKey) localStorage.setItem(API_KEY_STORAGE, state.apiKey);
+    else localStorage.removeItem(API_KEY_STORAGE);
+  } catch {}
+}
+
+function apiEventSourceUrl(path) {
+  const url = String(path || '');
+  if (!state.apiKey || !url.startsWith('/api/')) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}api_key=${encodeURIComponent(state.apiKey)}`;
+}
+
+async function apiFetch(input, init = {}) {
+  const url = typeof input === 'string' ? input : (input?.url || '');
+  if (!url.startsWith('/api/')) return rawFetch(input, init);
+  const headers = { ...(init.headers || {}) };
+  if (state.apiKey) {
+    headers.Authorization = `Bearer ${state.apiKey}`;
+    headers['X-API-Key'] = state.apiKey;
+  }
+  const res = await rawFetch(input, { ...init, headers });
+  if (res.status === 401 && !state.authWarned) {
+    state.authWarned = true;
+    if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = 'API Key 校验失败，请输入正确密钥后点击“应用到当前页面”';
+    showToast('API Key 校验失败', 'error');
+  } else if (res.status !== 401) {
+    state.authWarned = false;
+  }
+  return res;
+}
+
+function initNav() {
+  const btns = [...document.querySelectorAll('.side-link')];
+  const panels = [...document.querySelectorAll('.view-panel')];
+  btns.forEach((b) => b.addEventListener('click', () => {
+    const view = b.dataset.view;
+    btns.forEach((x) => x.classList.toggle('active', x === b));
+    panels.forEach((p) => p.classList.toggle('active', p.id === view));
+    if (DOM.pageTitle) DOM.pageTitle.textContent = VIEW_TITLES[view] || '控制台';
+  }));
+}
+
+function initCollapsible() {
+  document.querySelectorAll('.collapsible-trigger').forEach((t) => t.addEventListener('click', () => {
+    const box = t.closest('.collapsible');
+    if (box) box.classList.toggle('open');
+  }));
+}
+
+function initTheme() {
+  let theme = 'light';
+  try { theme = localStorage.getItem(THEME_KEY) || 'light'; } catch {}
+  applyTheme(theme);
+  on(DOM.themeToggleBtn, 'click', () => {
+    const next = document.body.classList.contains('theme-light') ? 'dark' : 'light';
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
   });
 }
 
-// ==========================================
-// 折叠面板
-// ==========================================
-function initCollapsibles() {
-  document.querySelectorAll('.collapsible-trigger').forEach(trigger => {
-    trigger.addEventListener('click', () => {
-      const section = trigger.closest('.collapsible');
-      if (!section) return;
-      const body = section.querySelector('.collapsible-body');
-      if (!body) return;
-      const icon = trigger.querySelector('.collapse-icon');
-      const isOpen = section.classList.contains('open');
-      if (isOpen) {
-        section.classList.remove('open');
-        body.style.display = 'none';
-        if (icon) icon.classList.remove('open');
+function applyTheme(theme) {
+  const light = theme === 'light';
+  document.body.classList.toggle('theme-light', light);
+  if (!DOM.themeToggleBtn) return;
+  const cur = light ? '明亮' : '暗色';
+  const nxt = light ? '暗色' : '明亮';
+  const lb = DOM.themeToggleBtn.querySelector('.theme-toggle-label');
+  if (lb) lb.textContent = cur;
+  DOM.themeToggleBtn.setAttribute('title', `切换到${nxt}主题`);
+  DOM.themeToggleBtn.setAttribute('aria-label', `切换到${nxt}主题`);
+}
+
+async function loadApiAuthStatus() {
+  try {
+    const res = await rawFetch('/api/auth/status');
+    const d = await res.json();
+    if (!res.ok) return;
+    if (DOM.apiAuthEnabled) DOM.apiAuthEnabled.checked = !!d.api_auth_enabled || !!d.enabled;
+    if (DOM.apiAuthStatus) {
+      if (d.enabled) {
+        DOM.apiAuthStatus.textContent = `鉴权已启用，当前 key: ${d.api_key_preview || '已配置'}`;
+      } else if (d.configured) {
+        DOM.apiAuthStatus.textContent = '检测到已保存 key，但鉴权未启用';
       } else {
-        section.classList.add('open');
-        body.style.display = 'block';
-        if (icon) icon.classList.add('open');
+        DOM.apiAuthStatus.textContent = '鉴权未启用';
       }
-    });
-  });
+    }
+  } catch {}
 }
 
-// ==========================================
-// SSE 日志连接
-// ==========================================
+function applyApiKeyToSession() {
+  const key = (DOM.apiAuthKeyInput?.value || '').trim();
+  setApiKey(key);
+  if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = key ? '已应用到当前页面请求头' : '已清空当前页面 API Key';
+  connectSSE();
+  showToast(key ? 'API Key 已应用到当前页面' : 'API Key 已清空', 'success');
+}
+
+async function saveApiAuthConfig() {
+  if (!DOM.apiAuthSaveBtn) return;
+  const enabled = !!DOM.apiAuthEnabled?.checked;
+  const key = (DOM.apiAuthKeyInput?.value || '').trim();
+
+  DOM.apiAuthSaveBtn.disabled = true;
+  if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = '保存中...';
+
+  try {
+    const res = await apiFetch('/api/auth/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, api_key: key }),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    if (d.api_key) {
+      setApiKey(d.api_key);
+      if (DOM.apiAuthKeyInput) DOM.apiAuthKeyInput.value = d.api_key;
+    } else if (key) {
+      setApiKey(key);
+    }
+    if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = `已保存，当前 key: ${d.api_key_preview || '已配置'}`;
+    connectSSE();
+    showToast('鉴权配置已保存', 'success');
+  } catch (e) {
+    if (DOM.apiAuthStatus) DOM.apiAuthStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  DOM.apiAuthSaveBtn.disabled = false;
+}
+
 function connectSSE() {
   if (state.eventSource) state.eventSource.close();
-  const es = new EventSource('/api/logs');
-  state.eventSource = es;
-
-  es.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    appendLog(event);
-
-    if (event.level === 'token_saved') {
-      loadTokens();
-      showToast('新 Token 已保存: ' + event.message, 'success');
+  state.eventSource = new EventSource(apiEventSourceUrl('/api/logs'));
+  state.eventSource.onmessage = (e) => {
+    let ev; try { ev = JSON.parse(e.data); } catch { return; }
+    appendLog(ev);
+    if (ev.level === 'token_saved') { loadTokens(); showToast(`新 Token 已保存: ${ev.message || ''}`, 'success'); }
+    if (ev.level === 'sync_ok') showToast(`已自动同步: ${ev.message || ''}`, 'success');
+    if (ev.step === 'start') { state.currentSteps = {}; renderSteps(); if (state.countdownTimer) clearInterval(state.countdownTimer); }
+    if (ev.step === 'wait') {
+      const m = String(ev.message || '').match(/(\d+)/);
+      if (m) startCountdown(parseInt(m[1], 10));
     }
-    if (event.level === 'sync_ok') {
-      showToast('已自动同步: ' + event.message, 'success');
-    }
-    if (event.step === 'start' && !state.stepsInRun) {
-      state.stepsInRun = true;
-      Object.keys(state.currentSteps).forEach(k => delete state.currentSteps[k]);
-      renderSteps();
-      if (state.countdownTimer) {
-        clearInterval(state.countdownTimer);
-        state.countdownTimer = null;
-      }
-    }
-    if (event.step === 'wait' && event.message) {
-      const match = event.message.match(/(\d+)\s*?);
-      if (match) startCountdown(parseInt(match[1]));
-    }
-    if (event.step) updateStep(event.step, event.level);
+    if (ev.step) updateStep(ev.step, ev.level);
   };
-
-  es.onerror = () => setTimeout(connectSSE, 3000);
+  state.eventSource.onerror = () => setTimeout(connectSSE, 3000);
 }
 
-// ==========================================
-// 日志渲染
-// ==========================================
-const LEVEL_ICON = { info: 'i', success: '+', error: 'x', warn: '!', connected: '*' };
-
-function appendLog(event) {
-  const { ts, level, message, step } = event;
-  state.logCount++;
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  entry.innerHTML = `
-    <span class="log-ts">${ts || ''}</span>
-    <span class="log-icon">${LEVEL_ICON[level] || '·'}</span>
-    <span class="log-msg ${level}">${escapeHtml(message)}</span>
-    ${step && !['start', 'stopped', 'retry', 'wait', 'runtime'].includes(step)
-      ? `<span class="log-step">${escapeHtml(step)}</span>` : ''}
-  `;
-  DOM.logBody.appendChild(entry);
-  DOM.logCount.textContent = state.logCount;
+function appendLog(ev) {
+  if (!DOM.logBody || !DOM.logCount) return;
+  const lv = String(ev.level || 'info');
+  const row = document.createElement('div');
+  row.className = 'log-entry';
+  row.innerHTML = `<span class="log-ts">${esc(ev.ts || '')}</span><span class="log-icon">${LEVEL_ICONS[lv] || '•'}</span><span class="log-msg ${esc(lv)}">${esc(ev.message || '')}</span><span class="log-step">${esc(ev.step || '')}</span>`;
+  DOM.logBody.appendChild(row);
+  state.logCount += 1;
+  DOM.logCount.textContent = String(state.logCount);
+  const list = DOM.logBody.querySelectorAll('.log-entry');
+  if (list.length > 2000) list[0].remove();
   if (state.autoScroll) DOM.logBody.scrollTop = DOM.logBody.scrollHeight;
-  const entries = DOM.logBody.querySelectorAll('.log-entry');
-  if (entries.length > 2000) entries[0].remove();
 }
 
 function clearLog() {
-  DOM.logBody.innerHTML = '';
+  if (DOM.logBody) DOM.logBody.innerHTML = '';
   state.logCount = 0;
-  DOM.logCount.textContent = '0';
+  if (DOM.logCount) DOM.logCount.textContent = '0';
 }
 
-// ==========================================
-// 代理检测
-// ==========================================
-async function checkProxy() {
-  const proxy = DOM.proxyInput.value.trim();
-  if (!proxy) { showToast('请先填写代理地址', 'error'); return; }
-  DOM.proxyStatus.className = 'proxy-status';
-  DOM.proxyStatus.innerHTML = '<span>棢测中...</span>';
-  DOM.checkProxyBtn.disabled = true;
-  try {
-    const res = await fetch('/api/check-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ proxy }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      DOM.proxyStatus.className = 'proxy-status ok';
-      DOM.proxyStatus.innerHTML = `<span>可用 · 扢在地: <b>${escapeHtml(data.loc || '')}</b></span>`;
-    } else {
-      DOM.proxyStatus.className = 'proxy-status fail';
-      DOM.proxyStatus.innerHTML = `<span>不可用 · ${escapeHtml(data.error || '')}</span>`;
-    }
-  } catch {
-    DOM.proxyStatus.className = 'proxy-status fail';
-    DOM.proxyStatus.innerHTML = '<span>检测请求失败</span>';
-  } finally {
-    DOM.checkProxyBtn.disabled = false;
-  }
-}
-
-// ==========================================
-// 代理保存
-// ==========================================
-async function saveProxy() {
-  const proxy = DOM.proxyInput.value.trim();
-  const proxyPoolEnabled = DOM.proxyPoolEnabled ? DOM.proxyPoolEnabled.checked : false;
-  if (!proxy && !proxyPoolEnabled) { showToast('Please set proxy or enable proxy pool', 'error'); return; }
-  const auto_register = DOM.autoRegisterCheck ? DOM.autoRegisterCheck.checked : false;
-  const desired_token_count = DOM.expectedTokenCountInput ? (parseInt(DOM.expectedTokenCountInput.value, 10) || 0) : 0;
-  const local_auto_maintain = DOM.localAutoMaintainCheck ? DOM.localAutoMaintainCheck.checked : false;
-  const local_maintain_interval_minutes = DOM.localMaintainIntervalInput ? (parseInt(DOM.localMaintainIntervalInput.value, 10) || 30) : 30;
-  try {
-    const res = await fetch('/api/proxy/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proxy,
-        auto_register,
-        desired_token_count,
-        local_auto_maintain,
-        local_maintain_interval_minutes,
-      }),
-    });
-    if (res.ok) {
-      showToast('代理配置已保存', 'success');
-    } else {
-      showToast('保存失败', 'error');
-    }
-  } catch (e) {
-    showToast('保存请求失败: ' + e.message, 'error');
-  }
-}
-
-// ==========================================
-// 启动 / 停止任务
-// ==========================================
-async function startTask() {
-  const proxy = DOM.proxyInput.value.trim();
-  const proxyPoolEnabled = DOM.proxyPoolEnabled ? DOM.proxyPoolEnabled.checked : false;
-  if (!proxy && !proxyPoolEnabled) { showToast('请填写代理地坢或启用代理池', 'error'); return; }
-  const multithread = DOM.multithreadCheck ? DOM.multithreadCheck.checked : false;
-  const thread_count = DOM.threadCountInput ? parseInt(DOM.threadCountInput.value) || 3 : 1;
-  try {
-    const res = await fetch('/api/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ proxy, multithread, thread_count }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showToast(data.detail || '启动失败', 'error');
-      return;
-    }
-    Object.keys(state.currentSteps).forEach(k => delete state.currentSteps[k]);
-    renderSteps();
-    const workerMsg = multithread ? ` (${data.workers || thread_count} 线程)` : '';
-    showToast('注册任务已启动' + workerMsg, 'success');
-    updateStatus();
-  } catch (e) {
-    showToast('启动请求失败: ' + e.message, 'error');
-  }
-}
-
-async function stopTask() {
-  try {
-    const res = await fetch('/api/stop', { method: 'POST' });
-    if (!res.ok) {
-      const data = await res.json();
-      showToast(data.detail || '停止失败', 'error');
-      return;
-    }
-    showToast('正在停止任务...', 'info');
-    updateStatus();
-  } catch (e) {
-    showToast('停止请求失败: ' + e.message, 'error');
-  }
-}
-
-// ==========================================
-// 状态更新
-// ==========================================
-async function updateStatus() {
-  try {
-    const res = await fetch('/api/status');
-    const data = await res.json();
-    state.status = data.status;
-    state.successCount = data.success;
-    state.failCount = data.fail;
-
-    DOM.statusBadge.className = `status-badge ${data.status}`;
-    const labelMap = { idle: '空闲', running: '运行中', stopping: '停止中' };
-    DOM.statusText.textContent = labelMap[data.status] || data.status;
-
-    const isRunning = data.status === 'running';
-    const isStopping = data.status === 'stopping';
-    DOM.btnStart.disabled = isRunning || isStopping;
-    DOM.btnStop.disabled = !isRunning;
-    DOM.progressFill.className = isRunning ? 'progress-fill running' : 'progress-fill';
-
-    DOM.statSuccess.textContent = data.success;
-    DOM.statFail.textContent = data.fail;
-    DOM.statTotal.textContent = data.success + data.fail;
-
-    // 任务结束后兜底清理步骤高亮，避免出现“状态已停但步骤还在跑的视觉残留
-    if (data.status === 'idle') {
-      state.stepsInRun = false;
-      if (Object.keys(state.currentSteps).length > 0) {
-        Object.keys(state.currentSteps).forEach(k => delete state.currentSteps[k]);
-        renderSteps();
-      }
-      if (state.countdownTimer) {
-        clearInterval(state.countdownTimer);
-        state.countdownTimer = null;
-      }
-    }
-  } catch { }
-}
-
-// ==========================================
-// 步骤追踪
-// ==========================================
 function renderSteps() {
-  DOM.stepsTracker.innerHTML = STEPS.map(s => {
-    const st = state.currentSteps[s.id] || '';
-    return `<div class="step-item ${st}" id="step-${s.id}"><span class="step-dot"></span><span>${s.label}</span></div>`;
-  }).join('');
+  if (!DOM.stepsTracker) return;
+  DOM.stepsTracker.innerHTML = STEPS.map(([id, label]) => `<div id="step-${id}" class="step-item ${state.currentSteps[id] || ''}">${esc(label)}</div>`).join('');
+  updateProgress();
 }
 
-function updateStep(stepId, level) {
-  let stepState = '';
-  if (level === 'success') stepState = 'done';
-  else if (level === 'error') stepState = 'error';
-  else if (level === 'info' || level === 'warn') stepState = 'active';
-  if (stepState) {
-    state.currentSteps[stepId] = stepState;
-    const el = $(`step-${stepId}`);
-    if (el) el.className = `step-item ${stepState}`;
-  }
+function updateStep(step, level) {
+  if (!step) return;
+  const cur = state.currentSteps[step] || '';
+  if (['success','token_saved','sync_ok'].includes(level)) state.currentSteps[step] = 'success';
+  else if (['error','fail'].includes(level)) state.currentSteps[step] = 'error';
+  else if (['info','warn','connected'].includes(level) && cur !== 'success' && cur !== 'error') state.currentSteps[step] = 'active';
+  const el = $(`step-${step}`);
+  if (el) el.className = `step-item ${state.currentSteps[step] || ''}`;
+  updateProgress();
 }
 
-function startCountdown(seconds) {
+function updateProgress() {
+  if (!DOM.progressFill) return;
+  const done = Object.values(state.currentSteps).filter((x) => x === 'success').length;
+  DOM.progressFill.style.width = `${Math.round((done / STEPS.length) * 100)}%`;
+}
+
+function startCountdown(sec) {
   if (state.countdownTimer) clearInterval(state.countdownTimer);
-  let remaining = seconds;
-  const entries = DOM.logBody.querySelectorAll('.log-entry');
-  const countdownEntry = entries.length > 0 ? entries[entries.length - 1] : null;
-  const countdownMsgEl = countdownEntry ? countdownEntry.querySelector('.log-msg') : null;
+  let r = sec;
+  const rows = DOM.logBody ? DOM.logBody.querySelectorAll('.log-entry') : [];
+  const msg = rows.length ? rows[rows.length - 1].querySelector('.log-msg') : null;
   state.countdownTimer = setInterval(() => {
-    remaining--;
-    if (remaining <= 0) { clearInterval(state.countdownTimer); state.countdownTimer = null; return; }
-    if (countdownMsgEl) countdownMsgEl.textContent = `休息中... 剩余 ${remaining} 秒`;
+    r -= 1;
+    if (r <= 0) return clearInterval(state.countdownTimer);
+    if (msg) msg.textContent = `等待中... 剩余 ${r} 秒`;
   }, 1000);
 }
 
-// ==========================================
-// Token 列表
-// ==========================================
+async function updateStatus() {
+  try {
+    const res = await apiFetch('/api/status');
+    const d = await res.json();
+    if (!res.ok) return;
+    state.status = d.status || 'idle';
+    const suc = num(d.success), fail = num(d.fail);
+    if (DOM.statSuccess) DOM.statSuccess.textContent = String(suc);
+    if (DOM.statFail) DOM.statFail.textContent = String(fail);
+    if (DOM.statTotal) DOM.statTotal.textContent = String(suc + fail);
+    if (DOM.statusBadge) DOM.statusBadge.className = `status-badge ${state.status}`;
+    if (DOM.statusText) DOM.statusText.textContent = ({ idle: '空闲', running: '运行中', stopping: '停止中' }[state.status] || state.status);
+    if (DOM.btnStart) DOM.btnStart.disabled = state.status !== 'idle';
+    if (DOM.btnStop) DOM.btnStop.disabled = state.status === 'idle';
+  } catch {}
+}
+
+async function checkProxy() {
+  const proxy = (DOM.proxyInput?.value || '').trim();
+  if (!proxy) return showToast('请先输入代理地址', 'error');
+  if (DOM.checkProxyBtn) DOM.checkProxyBtn.disabled = true;
+  if (DOM.proxyStatus) DOM.proxyStatus.textContent = '检测中...';
+  try {
+    const res = await apiFetch('/api/check-proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy }) });
+    const d = await res.json();
+    if (d.ok) {
+      if (DOM.proxyStatus) DOM.proxyStatus.textContent = `可用，地区 ${d.loc || '--'}`;
+      showToast('代理可用', 'success');
+    } else {
+      const m = d.error || d.detail || '检测失败';
+      if (DOM.proxyStatus) DOM.proxyStatus.textContent = m;
+      showToast(m, 'error');
+    }
+  } catch (e) {
+    if (DOM.proxyStatus) DOM.proxyStatus.textContent = `检测失败: ${e.message}`;
+    showToast(`检测失败: ${e.message}`, 'error');
+  }
+  if (DOM.checkProxyBtn) DOM.checkProxyBtn.disabled = false;
+}
+
+async function saveProxy() {
+  const payload = {
+    proxy: (DOM.proxyInput?.value || '').trim(),
+    auto_register: !!DOM.autoRegisterCheck?.checked,
+    desired_token_count: num(DOM.expectedTokenCountInput?.value),
+    local_auto_maintain: !!DOM.localAutoMaintainCheck?.checked,
+    local_maintain_interval_minutes: num(DOM.localMaintainIntervalInput?.value, 30),
+  };
+  if (DOM.saveProxyBtn) DOM.saveProxyBtn.disabled = true;
+  try {
+    const res = await apiFetch('/api/proxy/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json();
+    if (!res.ok) return showToast(d.detail || '保存失败', 'error');
+    showToast('代理配置已保存', 'success');
+  } catch (e) {
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+  if (DOM.saveProxyBtn) DOM.saveProxyBtn.disabled = false;
+}
+
+async function startTask() {
+  const payload = { proxy: (DOM.proxyInput?.value || '').trim(), multithread: !!DOM.multithreadCheck?.checked, thread_count: num(DOM.threadCountInput?.value, 3) };
+  if (DOM.btnStart) DOM.btnStart.disabled = true;
+  try {
+    const res = await apiFetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json();
+    if (!res.ok) return showToast(d.detail || '启动失败', 'error');
+    state.currentSteps = {};
+    renderSteps();
+    showToast(`注册任务已启动 (${d.workers || payload.thread_count} 线程)`, 'success');
+    updateStatus();
+  } catch (e) {
+    showToast(`启动失败: ${e.message}`, 'error');
+  }
+  if (DOM.btnStart) DOM.btnStart.disabled = false;
+}
+
+async function stopTask() {
+  if (DOM.btnStop) DOM.btnStop.disabled = true;
+  try {
+    const res = await apiFetch('/api/stop', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) return showToast(d.detail || '停止失败', 'error');
+    showToast('任务正在停止', 'warn');
+    updateStatus();
+  } catch (e) {
+    showToast(`停止失败: ${e.message}`, 'error');
+  }
+  if (DOM.btnStop) DOM.btnStop.disabled = false;
+}
+function tokenPlatforms(t) {
+  const set = new Set();
+  const top = Array.isArray(t?.uploaded_platforms) ? t.uploaded_platforms : [];
+  const body = t?.content || {};
+  const arr = Array.isArray(body.uploaded_platforms) ? body.uploaded_platforms : [];
+  [...top, ...arr].forEach((p) => {
+    p = String(p || '').toLowerCase().trim();
+    if (p === 'cpa' || p === 'sub2api') set.add(p);
+  });
+  if (body.cpa_uploaded || body.cpa_synced) set.add('cpa');
+  if (body.sub2api_uploaded || body.sub2api_synced || body.synced) set.add('sub2api');
+  return ['cpa', 'sub2api'].filter((k) => set.has(k));
+}
+
+function quotaText(t) {
+  const rem = numOrNull(t?.quota_remaining_percent);
+  if (rem !== null) return `${rem.toFixed(1)}%`;
+  const used = numOrNull(t?.content?.quota_used_percent);
+  if (used !== null) return `${Math.max(0, 100 - used).toFixed(1)}%`;
+  const st = String(t?.content?.quota_status || '').trim();
+  return st || '--';
+}
+
+function fmtTime(v) {
+  if (!v) return '--';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function filteredTokens() {
+  const kw = state.tokenFilter.keyword.toLowerCase();
+  return (state.tokens || []).filter((t) => {
+    const p = tokenPlatforms(t);
+    const synced = p.length > 0;
+    const s = state.tokenFilter.status;
+    if (s === 'synced' && !synced) return false;
+    if (s === 'unsynced' && synced) return false;
+    if (s === 'cpa' && !p.includes('cpa')) return false;
+    if (s === 'sub2api' && !p.includes('sub2api')) return false;
+    if (s === 'both' && !(p.includes('cpa') && p.includes('sub2api'))) return false;
+    if (!kw) return true;
+    return String(t.email || '').toLowerCase().includes(kw) || String(t.filename || '').toLowerCase().includes(kw);
+  });
+}
+
 async function loadTokens() {
   try {
-    const res = await fetch('/api/tokens');
-    const data = await res.json();
-    state.tokens = data.tokens || [];
-    state.tokenSummary = data.summary || {};
+    const res = await apiFetch('/api/tokens');
+    const d = await res.json();
+    if (!res.ok) return;
+    state.tokens = Array.isArray(d.tokens) ? d.tokens : [];
+    state.tokenSummary = d.summary || {};
     renderTokenList();
-  } catch { }
-}
-
-function getFilteredTokens(tokens) {
-  const status = state.tokenFilter.status || 'all';
-  const keyword = (state.tokenFilter.keyword || '').trim().toLowerCase();
-
-  return (tokens || []).filter((t) => {
-    const platforms = getTokenUploadedPlatforms(t);
-    const uploaded = platforms.length > 0;
-    if (status === 'synced' && !uploaded) return false;
-    if (status === 'unsynced' && uploaded) return false;
-    if (status === 'cpa' && !platforms.includes('cpa')) return false;
-    if (status === 'sub2api' && !platforms.includes('sub2api')) return false;
-    if (status === 'both' && !(platforms.includes('cpa') && platforms.includes('sub2api'))) return false;
-
-    if (!keyword) return true;
-    const email = String(t.email || '').toLowerCase();
-    const fname = String(t.filename || '').toLowerCase();
-    return email.includes(keyword) || fname.includes(keyword);
-  });
-}
-
-function getTokenUploadedPlatforms(token) {
-  const platforms = new Set();
-  const fromTop = Array.isArray(token && token.uploaded_platforms) ? token.uploaded_platforms : [];
-  const content = (token && token.content) || {};
-  const fromContent = Array.isArray(content.uploaded_platforms) ? content.uploaded_platforms : [];
-  [...fromTop, ...fromContent].forEach((p) => {
-    const name = String(p || '').toLowerCase().trim();
-    if (name === 'cpa' || name === 'sub2api') platforms.add(name);
-  });
-  if (content.cpa_uploaded || content.cpa_synced) platforms.add('cpa');
-  if (content.sub2api_uploaded || content.sub2api_synced || content.synced) platforms.add('sub2api');
-  return ['cpa', 'sub2api'].filter((p) => platforms.has(p));
-}
-
-function renderTokenList() {
-  const allTokens = state.tokens || [];
-  const filteredTokens = getFilteredTokens(allTokens);
-  if (DOM.poolTokenCount) {
-    DOM.poolTokenCount.textContent = `${filteredTokens.length}/${allTokens.length}`;
-  }
-  if (DOM.poolRecentTokenTotal) {
-    const total = Number((state.tokenSummary || {}).recent_total_tokens || 0);
-    DOM.poolRecentTokenTotal.textContent = `Token: ${Number.isFinite(total) ? total : 0}`;
-  }
-
-  if (!DOM.poolTokenList) return;
-  if (filteredTokens.length === 0) {
-    const msg = allTokens.length === 0 ? '暂无 Token' : '暂无符合筛条件的 Token';
-    DOM.poolTokenList.innerHTML = `<div class="empty-state"><div class="empty-icon">🔑</div><span>${msg}</span></div>`;
-    return;
-  }
-  DOM.poolTokenList.innerHTML = filteredTokens.map(t => renderTokenItem(t)).join('');
+  } catch {}
 }
 
 function applyTokenFilter() {
-  state.tokenFilter.status = DOM.tokenFilterStatus ? DOM.tokenFilterStatus.value : 'all';
-  state.tokenFilter.keyword = DOM.tokenFilterKeyword ? DOM.tokenFilterKeyword.value.trim() : '';
+  state.tokenFilter.status = DOM.tokenFilterStatus?.value || 'all';
+  state.tokenFilter.keyword = (DOM.tokenFilterKeyword?.value || '').trim();
   renderTokenList();
 }
 
 function resetTokenFilter() {
-  state.tokenFilter.status = 'all';
-  state.tokenFilter.keyword = '';
+  state.tokenFilter = { status: 'all', keyword: '' };
   if (DOM.tokenFilterStatus) DOM.tokenFilterStatus.value = 'all';
   if (DOM.tokenFilterKeyword) DOM.tokenFilterKeyword.value = '';
   renderTokenList();
 }
 
-function renderTokenItem(t) {
-  const platforms = getTokenUploadedPlatforms(t);
-  const uploaded = platforms.length > 0;
-  const platformBadges = platforms.length > 0
-    ? platforms.map((p) => `<span class="platform-badge ${p}">${p === 'cpa' ? 'CPA' : 'Sub2Api'}</span>`).join('')
-    : '<span class="platform-badge none">未上传</span>';
-  const expiredStr = formatTime(t.expired);
-  const planType = String(t.plan_type || ((t.content || {}).plan_type) || 'unknown').toLowerCase();
-  const quotaStr = formatRemainingQuota(t);
-  const recentUsageVal = toNumberOrNull(t.recent_token_usage);
-  const recentUsageStr = recentUsageVal === null ? '--' : String(recentUsageVal);
-  const tokenPayload = encodeURIComponent(JSON.stringify(t.content || {}));
-  const filePayload = encodeURIComponent(t.filename || '');
-  return `
-    <div class="token-item${uploaded ? ' synced' : ''}" id="token-${cssEscape(t.filename)}">
+function renderTokenList() {
+  if (!DOM.poolTokenList) return;
+  const all = state.tokens || [];
+  const list = filteredTokens();
+
+  if (DOM.poolTokenCount) DOM.poolTokenCount.textContent = `${list.length}/${all.length}`;
+  if (DOM.poolRecentTokenTotal) DOM.poolRecentTokenTotal.textContent = `近期总 Token: ${num(state.tokenSummary?.recent_total_tokens)}`;
+
+  if (!list.length) {
+    const msg = all.length ? '暂无符合筛选条件的数据' : '暂无 Token 数据';
+    DOM.poolTokenList.innerHTML = `<div class="token-item"><div class="token-info"><div class="token-meta">${msg}</div></div></div>`;
+    return;
+  }
+
+  DOM.poolTokenList.innerHTML = list.map((t) => {
+    const p = tokenPlatforms(t);
+    const badges = p.length
+      ? p.map((x) => `<span class="platform-badge ${x}">${x === 'cpa' ? 'CPA' : 'Sub2Api'}</span>`).join('')
+      : '<span class="platform-badge none">未上传</span>';
+    const payload = encodeURIComponent(JSON.stringify(t?.content || {}));
+    const file = encodeURIComponent(t?.filename || '');
+    const usage = numOrNull(t?.recent_token_usage);
+    const usageText = usage === null ? '--' : String(usage);
+
+    return `<div class="token-item${p.length ? ' synced' : ''}" id="token-${cssEsc(t?.filename || '')}">
       <div class="token-info">
-        <div class="token-email" title="${escapeHtml(t.email)}">
-          <span class="token-email-text">${escapeHtml(t.email || t.filename)}</span>
-        </div>
-        <div class="token-meta token-platforms">${platformBadges}</div>
-        <div class="token-meta">Plan: ${escapeHtml(planType)}</div>
-        <div class="token-meta">Quota: ${escapeHtml(quotaStr)} | Recent Tokens: ${escapeHtml(recentUsageStr)}</div>
-        <div class="token-meta">过期: ${expiredStr}</div>
+        <div class="token-email"><span class="token-email-text">${esc(t?.email || t?.filename || '')}</span></div>
+        <div class="token-meta token-platforms">${badges}</div>
+        <div class="token-meta">Plan: ${esc(t?.plan_type || t?.content?.plan_type || 'unknown')}</div>
+        <div class="token-meta">剩余额度: ${esc(quotaText(t))} | 近期 Token: ${esc(usageText)}</div>
+        <div class="token-meta">过期时间: ${esc(fmtTime(t?.expired))}</div>
       </div>
       <div class="token-actions">
-        <button class="btn btn-ghost btn-sm token-copy-btn" data-payload="${tokenPayload}">复制</button>
-        <button class="btn btn-danger btn-sm token-delete-btn" data-filename="${filePayload}">删除</button>
+        <button class="btn btn-ghost token-copy-btn" data-payload="${payload}">复制</button>
+        <button class="btn btn-danger token-delete-btn" data-filename="${file}">删除</button>
       </div>
     </div>`;
-}
-
-function formatTime(timeStr) {
-  if (!timeStr) return '未知';
-  try {
-    const d = new Date(timeStr);
-    if (isNaN(d.getTime())) return timeStr;
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch { return timeStr; }
-}
-
-async function copyToken(jsonStr) {
-  const ok = await copyText(jsonStr);
-  showToast(ok ? 'Token 已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
+  }).join('');
 }
 
 async function copyText(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    try { await navigator.clipboard.writeText(text); return true; } catch { }
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
   }
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
-    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
     document.body.appendChild(ta);
     ta.focus(); ta.select();
     const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
+    ta.remove();
     return ok;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
+}
+
+async function copyToken(payload) {
+  const ok = await copyText(payload);
+  showToast(ok ? 'Token 已复制到剪贴板' : '复制失败', ok ? 'success' : 'error');
 }
 
 async function copyAllRt() {
-  try {
-    const visibleTokens = getFilteredTokens(state.tokens || []);
-    const rts = visibleTokens.map(t => (t.content || {}).refresh_token || '').filter(Boolean);
-    if (rts.length === 0) { showToast('没有可用的 Refresh Token', 'error'); return; }
-    const ok = await copyText(rts.join('\n'));
-    showToast(ok ? `已复制 ${rts.length} 个 RT（当前筛选）` : '复制失败', ok ? 'success' : 'error');
-  } catch (e) { showToast('复制失败: ' + e.message, 'error'); }
+  const rts = filteredTokens().map((t) => t?.content?.refresh_token || '').filter(Boolean);
+  if (!rts.length) return showToast('没有可用的 Refresh Token', 'error');
+  const ok = await copyText(rts.join('\n'));
+  showToast(ok ? `已复制 ${rts.length} 个 RT（当前筛选）` : '复制失败', ok ? 'success' : 'error');
 }
 
 async function deleteToken(filename) {
-  if (!confirm(`确认删除 ${filename}？`)) return;
+  if (!filename || !confirm(`确认删除 ${filename} ?`)) return;
   try {
-    const res = await fetch(`/api/tokens/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-    if (res.ok) { showToast('已删除', 'info'); loadTokens(); }
-    else showToast('删除失败', 'error');
-  } catch { showToast('删除请求失败', 'error'); }
+    const res = await apiFetch(`/api/tokens/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    const d = await res.json();
+    if (!res.ok) return showToast(d.detail || '删除失败', 'error');
+    showToast('已删除', 'info');
+    loadTokens();
+  } catch (e) {
+    showToast(`删除失败: ${e.message}`, 'error');
+  }
 }
 
-// ==========================================
-// Sub2Api 同步配置
-// ==========================================
 async function loadSyncConfig() {
-  if (DOM.syncStatus) DOM.syncStatus.textContent = '';
   try {
-    const res = await fetch('/api/sync-config');
-    const cfg = await res.json();
-    DOM.sub2apiBaseUrl.value = cfg.base_url || '';
-    if (cfg.email) DOM.sub2apiEmail.value = cfg.email;
-    DOM.autoSyncCheck.checked = cfg.auto_sync !== 'false';
-    if (DOM.uploadMode) DOM.uploadMode.value = cfg.upload_mode || 'snapshot';
-    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '';
-    if (DOM.sub2apiMinCandidates) DOM.sub2apiMinCandidates.value = cfg.sub2api_min_candidates || 200;
-    if (DOM.sub2apiInterval) DOM.sub2apiInterval.value = cfg.sub2api_maintain_interval_minutes || 30;
-    if (DOM.sub2apiAutoMaintain) DOM.sub2apiAutoMaintain.checked = !!cfg.sub2api_auto_maintain;
-    if (DOM.multithreadCheck) DOM.multithreadCheck.checked = !!cfg.multithread;
-    if (DOM.threadCountInput) DOM.threadCountInput.value = cfg.thread_count || 3;
-    if (cfg.proxy && DOM.proxyInput) DOM.proxyInput.value = cfg.proxy;
-    if (DOM.autoRegisterCheck) DOM.autoRegisterCheck.checked = !!cfg.auto_register;
-    if (DOM.expectedTokenCountInput) DOM.expectedTokenCountInput.value = cfg.desired_token_count || 0;
-    if (DOM.localAutoMaintainCheck) DOM.localAutoMaintainCheck.checked = !!cfg.local_auto_maintain;
-    if (DOM.localMaintainIntervalInput) DOM.localMaintainIntervalInput.value = cfg.local_maintain_interval_minutes || 30;
-    if (DOM.syncStatus) DOM.syncStatus.textContent = '';
-  } catch { }
+    const res = await apiFetch('/api/sync-config');
+    const c = await res.json();
+    if (!res.ok) return;
+
+    if (DOM.sub2apiBaseUrl) DOM.sub2apiBaseUrl.value = c.base_url || '';
+    if (DOM.sub2apiEmail && c.email) DOM.sub2apiEmail.value = c.email;
+    if (DOM.autoSyncCheck) DOM.autoSyncCheck.checked = c.auto_sync !== 'false';
+    if (DOM.uploadMode) DOM.uploadMode.value = c.upload_mode || 'snapshot';
+    if (DOM.sub2apiMinCandidates) DOM.sub2apiMinCandidates.value = c.sub2api_min_candidates || 200;
+    if (DOM.sub2apiAutoMaintain) DOM.sub2apiAutoMaintain.checked = !!c.sub2api_auto_maintain;
+    if (DOM.sub2apiInterval) DOM.sub2apiInterval.value = c.sub2api_maintain_interval_minutes || 30;
+
+    if (DOM.multithreadCheck) DOM.multithreadCheck.checked = !!c.multithread;
+    if (DOM.threadCountInput) DOM.threadCountInput.value = c.thread_count || 3;
+
+    if (DOM.proxyInput && c.proxy) DOM.proxyInput.value = c.proxy;
+    if (DOM.autoRegisterCheck) DOM.autoRegisterCheck.checked = !!c.auto_register;
+    if (DOM.expectedTokenCountInput) DOM.expectedTokenCountInput.value = c.desired_token_count || 0;
+    if (DOM.localAutoMaintainCheck) DOM.localAutoMaintainCheck.checked = !!c.local_auto_maintain;
+    if (DOM.localMaintainIntervalInput) DOM.localMaintainIntervalInput.value = c.local_maintain_interval_minutes || 30;
+    if (DOM.apiAuthEnabled) DOM.apiAuthEnabled.checked = !!c.api_auth_enabled;
+    if (DOM.apiAuthStatus && c.x_api_key_preview) {
+      DOM.apiAuthStatus.textContent = `已保存 key: ${c.x_api_key_preview}`;
+    }
+  } catch {}
 }
 
-const PROXY_POOL_PROVIDER_DEFAULTS = {
+async function saveSyncConfig() {
+  const base_url = (DOM.sub2apiBaseUrl?.value || '').trim();
+  const email = (DOM.sub2apiEmail?.value || '').trim();
+  const password = (DOM.sub2apiPassword?.value || '').trim();
+  if (!base_url) return showToast('请填写 Sub2Api 地址', 'error');
+  if (!email) return showToast('请填写管理员邮箱', 'error');
+
+  const payload = {
+    base_url, email, password, account_name: 'AutoReg', auto_sync: DOM.autoSyncCheck?.checked ? 'true' : 'false',
+    upload_mode: DOM.uploadMode?.value || 'snapshot', sub2api_min_candidates: num(DOM.sub2apiMinCandidates?.value, 200),
+    sub2api_auto_maintain: !!DOM.sub2apiAutoMaintain?.checked, sub2api_maintain_interval_minutes: num(DOM.sub2apiInterval?.value, 30),
+    multithread: !!DOM.multithreadCheck?.checked, thread_count: num(DOM.threadCountInput?.value, 3),
+    auto_register: !!DOM.autoRegisterCheck?.checked, desired_token_count: num(DOM.expectedTokenCountInput?.value),
+    local_auto_maintain: !!DOM.localAutoMaintainCheck?.checked, local_maintain_interval_minutes: num(DOM.localMaintainIntervalInput?.value, 30),
+  };
+
+  if (DOM.saveSyncConfigBtn) { DOM.saveSyncConfigBtn.disabled = true; DOM.saveSyncConfigBtn.textContent = '保存中...'; }
+  if (DOM.syncStatus) DOM.syncStatus.textContent = '正在验证并保存...';
+
+  try {
+    const res = await apiFetch('/api/sync-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.syncStatus) DOM.syncStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    if (DOM.syncStatus) DOM.syncStatus.textContent = '配置已保存';
+    showToast('Sub2Api 配置已保存', 'success');
+    pollSub2ApiPoolStatus();
+  } catch (e) {
+    if (DOM.syncStatus) DOM.syncStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  if (DOM.saveSyncConfigBtn) { DOM.saveSyncConfigBtn.disabled = false; DOM.saveSyncConfigBtn.textContent = '保存 Sub2Api 配置'; }
+}
+
+async function saveUploadMode() {
+  const upload_mode = DOM.uploadMode?.value || 'snapshot';
+  if (!DOM.uploadModeSaveBtn) return;
+  const old = DOM.uploadModeSaveBtn.textContent;
+  DOM.uploadModeSaveBtn.disabled = true;
+  DOM.uploadModeSaveBtn.textContent = '保存中...';
+  if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '正在保存策略...';
+
+  try {
+    const res = await apiFetch('/api/upload-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_mode }) });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    const label = upload_mode === 'decoupled' ? '双平台同传（单账号双上传）' : '串行补平台（先 CPA 后 Sub2Api）';
+    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = `已保存：${label}`;
+    showToast(`上传策略已保存：${label}`, 'success');
+  } catch (e) {
+    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  DOM.uploadModeSaveBtn.disabled = false;
+  DOM.uploadModeSaveBtn.textContent = old || '保存上传模式';
+}
+
+async function batchSync() {
+  if (!DOM.poolPwSyncBtn) return;
+  const old = DOM.poolPwSyncBtn.textContent;
+  DOM.poolPwSyncBtn.disabled = true;
+  DOM.poolPwSyncBtn.textContent = '同步中...';
+  try {
+    const res = await apiFetch('/api/sync-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: [] }) });
+    const d = await res.json();
+    if (!res.ok) return showToast(d.detail || '同步失败', 'error');
+    showToast(`同步完成：共 ${d.total}，成功 ${d.ok}，失败 ${d.fail}`, d.fail > 0 ? 'warn' : 'success');
+    loadTokens();
+    pollSub2ApiPoolStatus();
+  } catch (e) {
+    showToast(`同步失败: ${e.message}`, 'error');
+  }
+  DOM.poolPwSyncBtn.disabled = false;
+  DOM.poolPwSyncBtn.textContent = old || '批量同步 Sub2Api';
+}
+const PROVIDER_DEFAULTS = {
   zenproxy_api: 'https://zenproxy.top/api/fetch',
   dreamy_socks5_pool: 'socks5://127.0.0.1:1080',
   docker_warp_socks: 'socks5://127.0.0.1:9091',
 };
 
-function normalizeProxyPoolProvider(value) {
-  const raw = String(value || 'zenproxy_api').trim().toLowerCase();
-  if (raw === 'dreamy_socks5_pool' || raw === 'dreamy_socks5' || raw === 'socks5_proxy') return 'dreamy_socks5_pool';
-  if (raw === 'docker_warp_socks' || raw === 'warp_socks' || raw === 'warp') return 'docker_warp_socks';
+function normalizeProvider(v) {
+  v = String(v || 'zenproxy_api').trim().toLowerCase();
+  if (['dreamy_socks5_pool','dreamy_socks5','socks5_proxy'].includes(v)) return 'dreamy_socks5_pool';
+  if (['docker_warp_socks','warp_socks','warp'].includes(v)) return 'docker_warp_socks';
   return 'zenproxy_api';
 }
 
-function formatRemainingQuota(token) {
-  const val = toNumberOrNull(token ? token.quota_remaining_percent : null);
-  if (val === null) return '--';
-  const normalized = Math.max(0, Math.min(100, val));
-  const rounded = Math.round(normalized * 100) / 100;
-  return `${rounded}%`;
+function isZenProvider(v) {
+  return normalizeProvider(v) === 'zenproxy_api';
 }
 
-function toNumberOrNull(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function isZenProxyProvider(provider) {
-  return normalizeProxyPoolProvider(provider) === 'zenproxy_api';
-}
-
-function applyProxyPoolProviderUI(provider, setDefaultUrl = false) {
-  const normalized = normalizeProxyPoolProvider(provider);
-  const zenMode = isZenProxyProvider(normalized);
-  const defaultUrl = PROXY_POOL_PROVIDER_DEFAULTS[normalized] || PROXY_POOL_PROVIDER_DEFAULTS.zenproxy_api;
-
-  if (DOM.proxyPoolProvider) DOM.proxyPoolProvider.value = normalized;
-  if (DOM.proxyPoolApiUrlLabel) DOM.proxyPoolApiUrlLabel.textContent = zenMode ? '抓取 API 地址' : '代理 URL';
-  if (DOM.proxyPoolZenAuthRow) DOM.proxyPoolZenAuthRow.style.display = zenMode ? '' : 'none';
-  if (DOM.proxyPoolZenFilterRow) DOM.proxyPoolZenFilterRow.style.display = zenMode ? '' : 'none';
-  if (DOM.proxyPoolAuthMode) DOM.proxyPoolAuthMode.disabled = !zenMode;
-  if (DOM.proxyPoolApiKey) {
-    DOM.proxyPoolApiKey.disabled = !zenMode;
-    if (zenMode) {
-      DOM.proxyPoolApiKey.placeholder = ' API Key';
-    } else {
-      DOM.proxyPoolApiKey.placeholder = 'Not required for this provider';
-    }
-  }
-  if (DOM.proxyPoolCount) DOM.proxyPoolCount.disabled = !zenMode;
-  if (DOM.proxyPoolCountry) DOM.proxyPoolCountry.disabled = !zenMode;
-  if (DOM.proxyPoolApiUrl) {
-    if (setDefaultUrl || !DOM.proxyPoolApiUrl.value.trim()) DOM.proxyPoolApiUrl.value = defaultUrl;
-    DOM.proxyPoolApiUrl.placeholder = defaultUrl;
-  }
+function applyProviderUI(provider, setDefault = false) {
+  provider = normalizeProvider(provider);
+  const zen = isZenProvider(provider);
+  if (DOM.proxyPoolProvider) DOM.proxyPoolProvider.value = provider;
+  if (DOM.proxyPoolApiUrlLabel) DOM.proxyPoolApiUrlLabel.textContent = zen ? '抓取 API 地址' : '代理 URL';
+  if (DOM.proxyPoolZenAuthRow) DOM.proxyPoolZenAuthRow.style.display = zen ? 'grid' : 'none';
+  if (DOM.proxyPoolZenFilterRow) DOM.proxyPoolZenFilterRow.style.display = zen ? 'grid' : 'none';
+  if (setDefault && DOM.proxyPoolApiUrl) DOM.proxyPoolApiUrl.value = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.zenproxy_api;
 }
 
 function onProxyPoolProviderChange() {
-  const provider = DOM.proxyPoolProvider ? DOM.proxyPoolProvider.value : 'zenproxy_api';
-  applyProxyPoolProviderUI(provider, true);
+  applyProviderUI(DOM.proxyPoolProvider?.value || 'zenproxy_api', true);
 }
 
-function buildProxyPoolPayload() {
-  const provider = normalizeProxyPoolProvider(DOM.proxyPoolProvider ? DOM.proxyPoolProvider.value : 'zenproxy_api');
+function proxyPoolPayload() {
+  const provider = normalizeProvider(DOM.proxyPoolProvider?.value || 'zenproxy_api');
   return {
-    proxy_pool_enabled: DOM.proxyPoolEnabled ? DOM.proxyPoolEnabled.checked : true,
+    proxy_pool_enabled: !!DOM.proxyPoolEnabled?.checked,
     proxy_pool_provider: provider,
-    proxy_pool_api_url: DOM.proxyPoolApiUrl
-      ? DOM.proxyPoolApiUrl.value.trim()
-      : (PROXY_POOL_PROVIDER_DEFAULTS[provider] || PROXY_POOL_PROVIDER_DEFAULTS.zenproxy_api),
-    proxy_pool_auth_mode: DOM.proxyPoolAuthMode ? DOM.proxyPoolAuthMode.value : 'query',
-    proxy_pool_api_key: DOM.proxyPoolApiKey ? DOM.proxyPoolApiKey.value.trim() : '',
-    proxy_pool_count: DOM.proxyPoolCount ? (parseInt(DOM.proxyPoolCount.value, 10) || 1) : 1,
-    proxy_pool_country: DOM.proxyPoolCountry ? DOM.proxyPoolCountry.value.trim().toUpperCase() : 'US',
+    proxy_pool_api_url: (DOM.proxyPoolApiUrl?.value || '').trim() || (PROVIDER_DEFAULTS[provider] || ''),
+    proxy_pool_auth_mode: String(DOM.proxyPoolAuthMode?.value || 'query').trim().toLowerCase(),
+    proxy_pool_api_key: (DOM.proxyPoolApiKey?.value || '').trim(),
+    proxy_pool_count: num(DOM.proxyPoolCount?.value, 1),
+    proxy_pool_country: String(DOM.proxyPoolCountry?.value || 'US').trim().toUpperCase() || 'US',
   };
 }
 
 async function loadProxyPoolConfig() {
   try {
-    const res = await fetch('/api/proxy-pool/config');
-    const cfg = await res.json();
-    const provider = normalizeProxyPoolProvider(cfg.proxy_pool_provider || 'zenproxy_api');
-    if (DOM.proxyPoolEnabled) DOM.proxyPoolEnabled.checked = !!cfg.proxy_pool_enabled;
-    applyProxyPoolProviderUI(provider, false);
-    if (DOM.proxyPoolApiUrl) {
-      const defaultUrl = PROXY_POOL_PROVIDER_DEFAULTS[provider] || PROXY_POOL_PROVIDER_DEFAULTS.zenproxy_api;
-      DOM.proxyPoolApiUrl.value = cfg.proxy_pool_api_url || defaultUrl;
-    }
-    if (DOM.proxyPoolAuthMode) DOM.proxyPoolAuthMode.value = cfg.proxy_pool_auth_mode || 'query';
-    if (DOM.proxyPoolCount) DOM.proxyPoolCount.value = cfg.proxy_pool_count || 1;
-    if (DOM.proxyPoolCountry) DOM.proxyPoolCountry.value = (cfg.proxy_pool_country || 'US').toUpperCase();
+    const res = await apiFetch('/api/proxy-pool/config');
+    const d = await res.json();
+    if (!res.ok) return;
+
+    const provider = normalizeProvider(d.proxy_pool_provider || 'zenproxy_api');
+    if (DOM.proxyPoolEnabled) DOM.proxyPoolEnabled.checked = !!d.proxy_pool_enabled;
+    applyProviderUI(provider, false);
+
+    if (DOM.proxyPoolApiUrl) DOM.proxyPoolApiUrl.value = d.proxy_pool_api_url || PROVIDER_DEFAULTS[provider] || '';
+    if (DOM.proxyPoolAuthMode) DOM.proxyPoolAuthMode.value = String(d.proxy_pool_auth_mode || 'query').toLowerCase();
     if (DOM.proxyPoolApiKey) {
       DOM.proxyPoolApiKey.value = '';
-      if (isZenProxyProvider(provider)) {
-        DOM.proxyPoolApiKey.placeholder = cfg.proxy_pool_api_key_preview
-          ? `ѱ: ${cfg.proxy_pool_api_key_preview}`
-          : ' API Key';
-      }
+      if (d.proxy_pool_api_key_preview) DOM.proxyPoolApiKey.placeholder = d.proxy_pool_api_key_preview;
     }
-    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '';
-  } catch { }
+    if (DOM.proxyPoolCount) DOM.proxyPoolCount.value = d.proxy_pool_count || 1;
+    if (DOM.proxyPoolCountry) DOM.proxyPoolCountry.value = d.proxy_pool_country || 'US';
+  } catch {}
 }
 
 async function saveProxyPoolConfig() {
   if (!DOM.proxyPoolSaveBtn) return;
-  const payload = buildProxyPoolPayload();
-  const zenMode = isZenProxyProvider(payload.proxy_pool_provider);
-  if (!payload.proxy_pool_api_url) {
-    showToast(zenMode ? 'д API ַ' : 'д̶ַ', 'error');
-    return;
-  }
-  if (payload.proxy_pool_count < 1) payload.proxy_pool_count = 1;
-  if (!payload.proxy_pool_country) payload.proxy_pool_country = 'US';
-
+  const old = DOM.proxyPoolSaveBtn.textContent;
   DOM.proxyPoolSaveBtn.disabled = true;
-  const oldText = DOM.proxyPoolSaveBtn.textContent;
-  DOM.proxyPoolSaveBtn.textContent = '...';
-  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = 'ڱ...';
+  DOM.proxyPoolSaveBtn.textContent = '保存中...';
+
   try {
-    const res = await fetch('/api/proxy-pool/config', {
+    const res = await apiFetch('/api/proxy-pool/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(proxyPoolPayload()),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
+    }
+    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '代理池配置已保存';
+    showToast('代理池配置已保存', 'success');
+  } catch (e) {
+    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+
+  DOM.proxyPoolSaveBtn.disabled = false;
+  DOM.proxyPoolSaveBtn.textContent = old || '保存代理池配置';
+}
+
+async function testProxyPoolFetch() {
+  if (!DOM.proxyPoolTestBtn) return;
+  const old = DOM.proxyPoolTestBtn.textContent;
+  DOM.proxyPoolTestBtn.disabled = true;
+  DOM.proxyPoolTestBtn.textContent = '测试中...';
+  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = '正在获取...';
+
+  const raw = proxyPoolPayload();
+  const payload = {
+    enabled: raw.proxy_pool_enabled,
+    provider: raw.proxy_pool_provider,
+    api_url: raw.proxy_pool_api_url,
+    auth_mode: raw.proxy_pool_auth_mode,
+    api_key: raw.proxy_pool_api_key,
+    count: raw.proxy_pool_count,
+    country: raw.proxy_pool_country,
+  };
+
+  try {
+    const res = await apiFetch('/api/proxy-pool/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data.detail || 'ʧ';
-      if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-      showToast(msg, 'error');
-      return;
+    const d = await res.json();
+
+    if (!res.ok || !d.ok) {
+      if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = d.error || d.detail || '测试失败';
+      return showToast(d.error || d.detail || '测试失败', 'error');
     }
-    if (DOM.proxyPoolApiKey && payload.proxy_pool_api_key && zenMode) {
-      DOM.proxyPoolApiKey.value = '';
-      DOM.proxyPoolApiKey.placeholder = `ѱ: ${payload.proxy_pool_api_key.slice(0, 8)}...`;
-    }
-    const msg = 'ѱ';
+
+    const msg = `测试成功：${d.proxy || '--'}${d.loc ? `，loc=${d.loc}` : ''}${d.supported === false ? '，不支持注册区(CN/HK)' : ''}${d.trace_error ? `，trace: ${d.trace_error}` : ''}`;
     if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-    showToast(msg, 'success');
+    showToast('代理池取代理成功', 'success');
   } catch (e) {
-    const msg = 'ʧ: ' + e.message;
-    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-    showToast(msg, 'error');
-  } finally {
-    DOM.proxyPoolSaveBtn.disabled = false;
-    DOM.proxyPoolSaveBtn.textContent = oldText || '';
+    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = `测试失败: ${e.message}`;
+    showToast(`测试失败: ${e.message}`, 'error');
   }
+
+  DOM.proxyPoolTestBtn.disabled = false;
+  DOM.proxyPoolTestBtn.textContent = old || '测试代理池获取';
 }
 
-async function saveSyncConfig() {
-  const base_url = DOM.sub2apiBaseUrl.value.trim();
-  const email = DOM.sub2apiEmail.value.trim();
-  const password = DOM.sub2apiPassword.value.trim();
-  const auto_sync = DOM.autoSyncCheck.checked ? 'true' : 'false';
-  const upload_mode = DOM.uploadMode ? DOM.uploadMode.value : 'snapshot';
-  const sub2api_min_candidates = parseInt(DOM.sub2apiMinCandidates.value) || 200;
-  const sub2api_auto_maintain = DOM.sub2apiAutoMaintain.checked;
-  const sub2api_maintain_interval_minutes = parseInt(DOM.sub2apiInterval.value) || 30;
-  const multithread = DOM.multithreadCheck ? DOM.multithreadCheck.checked : false;
-  const thread_count = DOM.threadCountInput ? parseInt(DOM.threadCountInput.value) || 3 : 3;
-  const auto_register = DOM.autoRegisterCheck ? DOM.autoRegisterCheck.checked : false;
-  const desired_token_count = DOM.expectedTokenCountInput ? (parseInt(DOM.expectedTokenCountInput.value) || 0) : 0;
-  const local_auto_maintain = DOM.localAutoMaintainCheck ? DOM.localAutoMaintainCheck.checked : false;
-  const local_maintain_interval_minutes = DOM.localMaintainIntervalInput ? (parseInt(DOM.localMaintainIntervalInput.value) || 30) : 30;
-
-  if (!base_url) { showToast('请填写平台地坢', 'error'); return; }
-  if (!email) { showToast('请填写邮箱', 'error'); return; }
-
-  DOM.saveSyncConfigBtn.disabled = true;
-  DOM.saveSyncConfigBtn.textContent = '验证中...';
-  DOM.syncStatus.textContent = '正在验证账号密码...';
-  try {
-    const res = await fetch('/api/sync-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        base_url, email, password, account_name: 'AutoReg', auto_sync,
-        upload_mode,
-        sub2api_min_candidates, sub2api_auto_maintain, sub2api_maintain_interval_minutes,
-        multithread, thread_count, auto_register,
-        desired_token_count, local_auto_maintain, local_maintain_interval_minutes,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      showToast('验证通过，配置已保存', 'success');
-      DOM.syncStatus.textContent = '验证通过，配置已保存';
-      pollSub2ApiPoolStatus();
-    } else {
-      showToast(data.detail || '验证失败', 'error');
-      DOM.syncStatus.textContent = data.detail || '验证失败';
-    }
-  } catch (e) {
-    showToast('请求失败: ' + e.message, 'error');
-    DOM.syncStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.saveSyncConfigBtn.disabled = false;
-    DOM.saveSyncConfigBtn.textContent = '保存';
-  }
-}
-
-async function saveUploadMode() {
-  const upload_mode = DOM.uploadMode ? DOM.uploadMode.value : 'snapshot';
-  if (!DOM.uploadModeSaveBtn) return;
-  DOM.uploadModeSaveBtn.disabled = true;
-  const oldText = DOM.uploadModeSaveBtn.textContent;
-  DOM.uploadModeSaveBtn.textContent = '保存中...';
-  if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '正在保存策略...';
-  try {
-    const res = await fetch('/api/upload-mode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ upload_mode }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data.detail || '保存失败';
-      showToast(msg, 'error');
-      if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = msg;
-      return;
-    }
-    const label = upload_mode === 'decoupled' ? '双平台同传（单账号双上传）' : '串行补平台（先 CPA 后 Sub2Api）';
-    showToast('上传策略已保存：' + label, 'success');
-    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '已保存：' + label;
-  } catch (e) {
-    showToast('请求失败: ' + e.message, 'error');
-    if (DOM.uploadModeStatus) DOM.uploadModeStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.uploadModeSaveBtn.disabled = false;
-    DOM.uploadModeSaveBtn.textContent = oldText || '保存策略';
-  }
-}
-
-async function batchSync() {
-  const btn = DOM.poolPwSyncBtn;
-  if (!btn) return;
-  btn.disabled = true;
-  btn.textContent = '导入中...';
-  showToast('批量导入已开始', 'info');
-  try {
-    const res = await fetch('/api/sync-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filenames: [] }),
-    });
-    const data = await res.json();
-    if (!res.ok) { showToast(data.detail || '导入失败', 'error'); return; }
-    const msg = `导入完成：共 ${data.total}，成功 ${data.ok}，失败 ${data.fail}`;
-    showToast(msg, data.fail > 0 ? 'info' : 'success');
-  } catch (e) {
-    showToast('导入失败: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '批量导入';
-  }
-}
-
-// ==========================================
-// CPA 配置
-// ==========================================
 async function loadPoolConfig() {
   try {
-    const res = await fetch('/api/pool/config');
-    const cfg = await res.json();
-    DOM.cpaBaseUrl.value = cfg.cpa_base_url || '';
-    DOM.cpaMinCandidates.value = cfg.min_candidates || 800;
-    DOM.cpaUsedPercent.value = cfg.used_percent_threshold || 95;
-    DOM.cpaAutoMaintain.checked = !!cfg.auto_maintain;
-    DOM.cpaInterval.value = cfg.maintain_interval_minutes || 30;
-    if (DOM.cpaStatus) DOM.cpaStatus.textContent = '';
-  } catch { }
+    const res = await apiFetch('/api/pool/config');
+    const d = await res.json();
+    if (!res.ok) return;
+
+    if (DOM.cpaBaseUrl) DOM.cpaBaseUrl.value = d.cpa_base_url || '';
+    if (DOM.cpaToken) {
+      DOM.cpaToken.value = '';
+      if (d.cpa_token_preview) DOM.cpaToken.placeholder = d.cpa_token_preview;
+    }
+    if (DOM.cpaMinCandidates) DOM.cpaMinCandidates.value = d.min_candidates || 800;
+    if (DOM.cpaUsedPercent) DOM.cpaUsedPercent.value = d.used_percent_threshold || 95;
+    if (DOM.cpaAutoMaintain) DOM.cpaAutoMaintain.checked = !!d.auto_maintain;
+    if (DOM.cpaInterval) DOM.cpaInterval.value = d.maintain_interval_minutes || 30;
+  } catch {}
 }
 
 async function savePoolConfig() {
   const payload = {
-    cpa_base_url: DOM.cpaBaseUrl.value.trim(),
-    cpa_token: DOM.cpaToken.value.trim(),
-    min_candidates: parseInt(DOM.cpaMinCandidates.value) || 800,
-    used_percent_threshold: parseInt(DOM.cpaUsedPercent.value) || 95,
-    auto_maintain: DOM.cpaAutoMaintain.checked,
-    maintain_interval_minutes: parseInt(DOM.cpaInterval.value) || 30,
+    cpa_base_url: (DOM.cpaBaseUrl?.value || '').trim(),
+    cpa_token: (DOM.cpaToken?.value || '').trim(),
+    min_candidates: num(DOM.cpaMinCandidates?.value, 800),
+    used_percent_threshold: num(DOM.cpaUsedPercent?.value, 95),
+    auto_maintain: !!DOM.cpaAutoMaintain?.checked,
+    maintain_interval_minutes: num(DOM.cpaInterval?.value, 30),
   };
-  DOM.cpaSaveBtn.disabled = true;
+
+  if (DOM.cpaSaveBtn) DOM.cpaSaveBtn.disabled = true;
   try {
-    const res = await fetch('/api/pool/config', {
+    const res = await apiFetch('/api/pool/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (res.ok) {
-      showToast('CPA 配置已保存', 'success');
-      DOM.cpaStatus.textContent = '配置已保存';
-      pollPoolStatus();
-    } else {
-      const data = await res.json();
-      showToast(data.detail || '保存失败', 'error');
-      DOM.cpaStatus.textContent = data.detail || '保存失败';
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.cpaStatus) DOM.cpaStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
     }
+    if (DOM.cpaStatus) DOM.cpaStatus.textContent = '配置已保存';
+    showToast('CPA 配置已保存', 'success');
+    pollPoolStatus();
   } catch (e) {
-    showToast('请求失败: ' + e.message, 'error');
-    DOM.cpaStatus.textContent = '请求失败';
-  } finally {
-    DOM.cpaSaveBtn.disabled = false;
+    if (DOM.cpaStatus) DOM.cpaStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
   }
+  if (DOM.cpaSaveBtn) DOM.cpaSaveBtn.disabled = false;
 }
 
 async function testCpaConnection() {
+  if (!DOM.cpaTestBtn) return;
   DOM.cpaTestBtn.disabled = true;
-  DOM.cpaStatus.textContent = '测试中...';
+  if (DOM.cpaStatus) DOM.cpaStatus.textContent = '测试中...';
+
   try {
-    const res = await fetch('/api/pool/check', { method: 'POST' });
-    const data = await res.json();
-    if (data.ok) {
-      DOM.cpaStatus.textContent = data.message || '连接成功';
+    const res = await apiFetch('/api/pool/check', { method: 'POST' });
+    const d = await res.json();
+    if (d.ok) {
+      if (DOM.cpaStatus) DOM.cpaStatus.textContent = d.message || '连接成功';
       showToast('CPA 连接成功', 'success');
     } else {
-      DOM.cpaStatus.textContent = data.message || data.detail || '连接失败';
-      showToast('CPA 连接失败', 'error');
+      const m = d.message || d.detail || '连接失败';
+      if (DOM.cpaStatus) DOM.cpaStatus.textContent = m;
+      showToast(m, 'error');
     }
   } catch (e) {
-    DOM.cpaStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.cpaTestBtn.disabled = false;
+    if (DOM.cpaStatus) DOM.cpaStatus.textContent = `测试失败: ${e.message}`;
+    showToast(`测试失败: ${e.message}`, 'error');
   }
+
+  DOM.cpaTestBtn.disabled = false;
 }
 
-// ==========================================
-// 池状态轮询
-// ==========================================
-async function pollPoolStatus() {
-  try {
-    const res = await fetch('/api/pool/status');
-    const data = await res.json();
-
-    if (!data.configured) {
-      if (DOM.poolTotal) DOM.poolTotal.textContent = '--';
-      if (DOM.poolCandidates) DOM.poolCandidates.textContent = '--';
-      if (DOM.poolError) DOM.poolError.textContent = '--';
-      if (DOM.poolThreshold) DOM.poolThreshold.textContent = '--';
-      if (DOM.poolPercent) DOM.poolPercent.textContent = '--';
-      updateHeaderCpa(null);
-      return;
-    }
-
-    const candidates = data.candidates || 0;
-    const errorCount = data.error_count || 0;
-    const threshold = data.threshold || 0;
-    const fillPct = threshold > 0 ? Math.round(candidates / threshold * 100) : 100;
-
-    if (DOM.poolTotal) DOM.poolTotal.textContent = data.total || 0;
-    if (DOM.poolCandidates) DOM.poolCandidates.textContent = candidates;
-    if (DOM.poolError) {
-      DOM.poolError.textContent = errorCount;
-      DOM.poolError.className = `stat-value ${errorCount > 0 ? 'red' : 'green'}`;
-    }
-    if (DOM.poolThreshold) DOM.poolThreshold.textContent = threshold;
-    if (DOM.poolPercent) {
-      DOM.poolPercent.textContent = fillPct + '%';
-      DOM.poolPercent.className = `stat-value ${fillPct >= 100 ? 'green' : fillPct >= 80 ? 'yellow' : 'red'}`;
-    }
-
-    updateHeaderCpa({ candidates, threshold, fillPct, errorCount });
-  } catch { }
-}
-
-async function triggerMaintenance() {
-  DOM.poolMaintainBtn.disabled = true;
-  DOM.poolMaintainBtn.textContent = '维护中...';
-  DOM.poolMaintainStatus.textContent = '正在探测并清理无效账号...';
-  try {
-    const res = await fetch('/api/pool/maintain', { method: 'POST' });
-    const data = await res.json();
-    if (res.ok) {
-      const msg = `维护完成: 无效 ${data.invalid_count || 0}, 已删除 ${data.deleted_ok || 0}, 失败 ${data.deleted_fail || 0}`;
-      DOM.poolMaintainStatus.textContent = msg;
-      showToast(msg, 'success');
-      pollPoolStatus();
-    } else {
-      DOM.poolMaintainStatus.textContent = data.detail || '维护失败';
-      showToast(data.detail || '维护失败', 'error');
-    }
-  } catch (e) {
-    DOM.poolMaintainStatus.textContent = '请求失败: ' + e.message;
-    showToast('维护请求失败', 'error');
-  } finally {
-    DOM.poolMaintainBtn.disabled = false;
-    DOM.poolMaintainBtn.textContent = '维护';
-  }
-}
-
-// ==========================================
-// Sub2Api 池状态轮询
-// ==========================================
-async function pollSub2ApiPoolStatus() {
-  try {
-    const res = await fetch('/api/sub2api/pool/status');
-    const data = await res.json();
-
-    if (data.configured && data.error) {
-      if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = 'Sub2Api 状态获取失败: ' + data.error;
-      updateHeaderSub2Api(null);
-      return;
-    }
-
-    if (!data.configured) {
-      if (DOM.sub2apiPoolTotal) DOM.sub2apiPoolTotal.textContent = '--';
-      if (DOM.sub2apiPoolNormal) DOM.sub2apiPoolNormal.textContent = '--';
-      if (DOM.sub2apiPoolError) DOM.sub2apiPoolError.textContent = '--';
-      if (DOM.sub2apiPoolThreshold) DOM.sub2apiPoolThreshold.textContent = '--';
-      if (DOM.sub2apiPoolPercent) DOM.sub2apiPoolPercent.textContent = '--';
-      updateHeaderSub2Api(null);
-      return;
-    }
-
-    const normal = data.candidates || 0;
-    const error = data.error_count || 0;
-    const total = data.total || 0;
-    const threshold = data.threshold || 0;
-    // 充足率 = 正常账号 / 目标阈值
-    const fillPct = threshold > 0 ? Math.round(normal / threshold * 100) : 100;
-    // 健康度 = 正常账号 / 总账号（无异常时为 100%）
-    const healthPct = total > 0 ? Math.round(normal / total * 100) : 100;
-
-    if (DOM.sub2apiPoolTotal) DOM.sub2apiPoolTotal.textContent = total;
-    if (DOM.sub2apiPoolNormal) DOM.sub2apiPoolNormal.textContent = normal;
-    if (DOM.sub2apiPoolError) {
-      DOM.sub2apiPoolError.textContent = error;
-      DOM.sub2apiPoolError.className = `stat-value ${error > 0 ? 'red' : 'green'}`;
-    }
-    if (DOM.sub2apiPoolThreshold) DOM.sub2apiPoolThreshold.textContent = threshold;
-    if (DOM.sub2apiPoolPercent) {
-      DOM.sub2apiPoolPercent.textContent = fillPct + '%';
-      DOM.sub2apiPoolPercent.className = `stat-value ${fillPct >= 100 ? 'green' : fillPct >= 80 ? 'yellow' : 'red'}`;
-    }
-
-    updateHeaderSub2Api({ normal, threshold, fillPct, error });
-  } catch { }
-}
-
-function updateHeaderSub2Api(data) {
-  if (!data) {
-    if (DOM.headerSub2apiLabel) DOM.headerSub2apiLabel.textContent = '-- / --';
-    if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.textContent = '--';
-    if (DOM.headerSub2apiBar) DOM.headerSub2apiBar.style.width = '0%';
-    if (DOM.headerSub2apiChip) DOM.headerSub2apiChip.className = 'pool-chip status-idle';
-    if (DOM.headerSub2apiBar) DOM.headerSub2apiBar.className = 'pool-chip-fill';
-    if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.className = 'pool-chip-delta';
-    return;
-  }
-  const { normal, threshold, fillPct, error: errorCount } = data;
-  const state = _headerPoolState(fillPct, errorCount);
-  if (DOM.headerSub2apiLabel) DOM.headerSub2apiLabel.textContent = `${normal} / ${threshold}`;
-  if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.textContent = _headerPoolDelta(fillPct);
-  if (DOM.headerSub2apiBar) {
-    DOM.headerSub2apiBar.style.width = Math.min(100, fillPct) + '%';
-    DOM.headerSub2apiBar.className = `pool-chip-fill ${state}`;
-  }
-  if (DOM.headerSub2apiChip) DOM.headerSub2apiChip.className = `pool-chip status-${state}`;
-  if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.className = `pool-chip-delta ${state}`;
-}
-
-function updateHeaderCpa(data) {
-  if (!data) {
-    if (DOM.headerCpaLabel) DOM.headerCpaLabel.textContent = '-- / --';
-    if (DOM.headerCpaDelta) DOM.headerCpaDelta.textContent = '--';
-    if (DOM.headerCpaBar) DOM.headerCpaBar.style.width = '0%';
-    if (DOM.headerCpaChip) DOM.headerCpaChip.className = 'pool-chip status-idle';
-    if (DOM.headerCpaBar) DOM.headerCpaBar.className = 'pool-chip-fill';
-    if (DOM.headerCpaDelta) DOM.headerCpaDelta.className = 'pool-chip-delta';
-    return;
-  }
-  const { candidates, threshold, fillPct, errorCount } = data;
-  const state = _headerPoolState(fillPct, errorCount);
-  if (DOM.headerCpaLabel) DOM.headerCpaLabel.textContent = `${candidates} / ${threshold}`;
-  if (DOM.headerCpaDelta) DOM.headerCpaDelta.textContent = _headerPoolDelta(fillPct);
-  if (DOM.headerCpaBar) {
-    DOM.headerCpaBar.style.width = Math.min(100, fillPct) + '%';
-    DOM.headerCpaBar.className = `pool-chip-fill ${state}`;
-  }
-  if (DOM.headerCpaChip) DOM.headerCpaChip.className = `pool-chip status-${state}`;
-  if (DOM.headerCpaDelta) DOM.headerCpaDelta.className = `pool-chip-delta ${state}`;
-}
-
-function _headerPoolState(fillPct, errorCount) {
+function headerLevel(fillPct, errorCount) {
   if (errorCount > 0) return 'danger';
   if (fillPct > 110) return 'over';
   if (fillPct >= 100) return 'ok';
@@ -1230,381 +908,328 @@ function _headerPoolState(fillPct, errorCount) {
   return 'danger';
 }
 
-function _headerPoolDelta(fillPct) {
+function headerDelta(fillPct) {
   if (!Number.isFinite(fillPct)) return '--';
-  const delta = Math.round(fillPct - 100);
-  if (delta === 0) return '0%';
-  return `${delta > 0 ? '+' : ''}${delta}%`;
+  const d = Math.round(fillPct - 100);
+  if (d === 0) return '0%';
+  return `${d > 0 ? '+' : ''}${d}%`;
+}
+
+function updateHeaderSub2Api(data) {
+  if (!data) {
+    if (DOM.headerSub2apiLabel) DOM.headerSub2apiLabel.textContent = '-- / --';
+    if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.textContent = '--';
+    if (DOM.headerSub2apiBar) {
+      DOM.headerSub2apiBar.style.width = '0%';
+      DOM.headerSub2apiBar.className = 'pool-chip-fill';
+    }
+    if (DOM.headerSub2apiChip) DOM.headerSub2apiChip.className = 'pool-chip status-idle';
+    return;
+  }
+  const lv = headerLevel(data.fillPct, data.error);
+  if (DOM.headerSub2apiLabel) DOM.headerSub2apiLabel.textContent = `${data.normal} / ${data.threshold}`;
+  if (DOM.headerSub2apiDelta) DOM.headerSub2apiDelta.textContent = headerDelta(data.fillPct);
+  if (DOM.headerSub2apiBar) {
+    DOM.headerSub2apiBar.style.width = `${Math.min(100, data.fillPct)}%`;
+    DOM.headerSub2apiBar.className = `pool-chip-fill ${lv}`;
+  }
+  if (DOM.headerSub2apiChip) DOM.headerSub2apiChip.className = `pool-chip status-${lv}`;
+}
+
+function updateHeaderCpa(data) {
+  if (!data) {
+    if (DOM.headerCpaLabel) DOM.headerCpaLabel.textContent = '-- / --';
+    if (DOM.headerCpaDelta) DOM.headerCpaDelta.textContent = '--';
+    if (DOM.headerCpaBar) {
+      DOM.headerCpaBar.style.width = '0%';
+      DOM.headerCpaBar.className = 'pool-chip-fill';
+    }
+    if (DOM.headerCpaChip) DOM.headerCpaChip.className = 'pool-chip status-idle';
+    return;
+  }
+  const lv = headerLevel(data.fillPct, data.errorCount);
+  if (DOM.headerCpaLabel) DOM.headerCpaLabel.textContent = `${data.candidates} / ${data.threshold}`;
+  if (DOM.headerCpaDelta) DOM.headerCpaDelta.textContent = headerDelta(data.fillPct);
+  if (DOM.headerCpaBar) {
+    DOM.headerCpaBar.style.width = `${Math.min(100, data.fillPct)}%`;
+    DOM.headerCpaBar.className = `pool-chip-fill ${lv}`;
+  }
+  if (DOM.headerCpaChip) DOM.headerCpaChip.className = `pool-chip status-${lv}`;
+}
+
+async function pollPoolStatus() {
+  try {
+    const res = await apiFetch('/api/pool/status');
+    const d = await res.json();
+
+    if (!d.configured) {
+      ['poolTotal','poolCandidates','poolError','poolThreshold','poolPercent'].forEach((k) => { if (DOM[k]) DOM[k].textContent = '--'; });
+      return updateHeaderCpa(null);
+    }
+
+    const candidates = num(d.candidates);
+    const errorCount = num(d.error_count);
+    const threshold = num(d.threshold);
+    const fillPct = threshold > 0 ? Math.round((candidates / threshold) * 100) : 100;
+
+    if (DOM.poolTotal) DOM.poolTotal.textContent = String(num(d.total));
+    if (DOM.poolCandidates) DOM.poolCandidates.textContent = String(candidates);
+    if (DOM.poolError) DOM.poolError.textContent = String(errorCount);
+    if (DOM.poolThreshold) DOM.poolThreshold.textContent = String(threshold);
+    if (DOM.poolPercent) DOM.poolPercent.textContent = `${fillPct}%`;
+
+    updateHeaderCpa({ candidates, threshold, fillPct, errorCount });
+  } catch {}
+}
+
+async function triggerMaintenance() {
+  if (!DOM.poolMaintainBtn) return;
+  const old = DOM.poolMaintainBtn.textContent;
+  DOM.poolMaintainBtn.disabled = true;
+  DOM.poolMaintainBtn.textContent = '维护中...';
+  if (DOM.poolMaintainStatus) DOM.poolMaintainStatus.textContent = '正在探测并清理无效账号...';
+
+  try {
+    const res = await apiFetch('/api/pool/maintain', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.poolMaintainStatus) DOM.poolMaintainStatus.textContent = d.detail || '维护失败';
+      return showToast(d.detail || '维护失败', 'error');
+    }
+    const msg = `维护完成: 无效 ${num(d.invalid_count)}, 已删除 ${num(d.deleted_ok)}, 失败 ${num(d.deleted_fail)}`;
+    if (DOM.poolMaintainStatus) DOM.poolMaintainStatus.textContent = msg;
+    showToast(msg, 'success');
+    pollPoolStatus();
+    loadTokens();
+  } catch (e) {
+    if (DOM.poolMaintainStatus) DOM.poolMaintainStatus.textContent = `维护失败: ${e.message}`;
+    showToast(`维护失败: ${e.message}`, 'error');
+  }
+
+  DOM.poolMaintainBtn.disabled = false;
+  DOM.poolMaintainBtn.textContent = old || '维护';
+}
+
+async function pollSub2ApiPoolStatus() {
+  try {
+    const res = await apiFetch('/api/sub2api/pool/status');
+    const d = await res.json();
+
+    if (d.configured && d.error) {
+      if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = `Sub2Api 状态获取失败: ${d.error}`;
+      return updateHeaderSub2Api(null);
+    }
+
+    if (!d.configured) {
+      ['sub2apiPoolTotal','sub2apiPoolNormal','sub2apiPoolError','sub2apiPoolThreshold','sub2apiPoolPercent'].forEach((k) => { if (DOM[k]) DOM[k].textContent = '--'; });
+      return updateHeaderSub2Api(null);
+    }
+
+    const normal = num(d.candidates);
+    const error = num(d.error_count);
+    const total = num(d.total);
+    const threshold = num(d.threshold);
+    const fillPct = threshold > 0 ? Math.round((normal / threshold) * 100) : 100;
+
+    if (DOM.sub2apiPoolTotal) DOM.sub2apiPoolTotal.textContent = String(total);
+    if (DOM.sub2apiPoolNormal) DOM.sub2apiPoolNormal.textContent = String(normal);
+    if (DOM.sub2apiPoolError) DOM.sub2apiPoolError.textContent = String(error);
+    if (DOM.sub2apiPoolThreshold) DOM.sub2apiPoolThreshold.textContent = String(threshold);
+    if (DOM.sub2apiPoolPercent) DOM.sub2apiPoolPercent.textContent = `${fillPct}%`;
+
+    updateHeaderSub2Api({ normal, threshold, fillPct, error });
+  } catch {}
 }
 
 async function triggerSub2ApiMaintenance() {
+  if (!DOM.sub2apiPoolMaintainBtn) return;
+  const old = DOM.sub2apiPoolMaintainBtn.textContent;
   DOM.sub2apiPoolMaintainBtn.disabled = true;
   DOM.sub2apiPoolMaintainBtn.textContent = '维护中...';
-  DOM.sub2apiPoolMaintainStatus.textContent = '正在刷新异常账号并清理...';
-  try {
-    const res = await fetch('/api/sub2api/pool/maintain', { method: 'POST' });
-    const data = await res.json();
-    if (res.ok) {
-      const msg = `维护完成: 异常 ${data.error_count || 0}, 刷新 ${data.refreshed || 0}, 删除 ${data.deleted_ok || 0}, 失败 ${data.deleted_fail || 0}`;
-      DOM.sub2apiPoolMaintainStatus.textContent = msg;
-      showToast(msg, 'success');
-      pollSub2ApiPoolStatus();
-    } else {
-      DOM.sub2apiPoolMaintainStatus.textContent = data.detail || '维护失败';
-      showToast(data.detail || '维护失败', 'error');
-    }
-  } catch (e) {
-    DOM.sub2apiPoolMaintainStatus.textContent = '请求失败: ' + e.message;
-    showToast('Sub2Api 维护请求失败', 'error');
-  } finally {
-    DOM.sub2apiPoolMaintainBtn.disabled = false;
-    DOM.sub2apiPoolMaintainBtn.textContent = '维护';
-  }
-}
+  if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = '正在刷新异常账号并清理...';
 
-async function testProxyPoolFetch() {
-  if (!DOM.proxyPoolTestBtn) return;
-  DOM.proxyPoolTestBtn.disabled = true;
-  const oldText = DOM.proxyPoolTestBtn.textContent;
-  if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = 'ڲԴ...';
-  DOM.proxyPoolTestBtn.textContent = '...';
   try {
-    const payloadRaw = buildProxyPoolPayload();
-    const payload = {
-      enabled: payloadRaw.proxy_pool_enabled,
-      provider: payloadRaw.proxy_pool_provider,
-      api_url: payloadRaw.proxy_pool_api_url,
-      auth_mode: payloadRaw.proxy_pool_auth_mode,
-      api_key: payloadRaw.proxy_pool_api_key,
-      count: payloadRaw.proxy_pool_count,
-      country: payloadRaw.proxy_pool_country,
-    };
-    const res = await fetch('/api/proxy-pool/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
-      const msg = data.error || data.detail || 'زʧ';
-      if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-      showToast(msg, 'error');
-      return;
+    const res = await apiFetch('/api/sub2api/pool/maintain', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = d.detail || '维护失败';
+      return showToast(d.detail || '维护失败', 'error');
     }
-    const locText = data.loc ? ` loc=${data.loc}` : '';
-    const supportText = data.supported === null || data.supported === undefined
-      ? ''
-      : (data.supported ? ' ' : ' (CN/HK)');
-    const traceWarn = data.trace_error ? ` (traceʧ: ${data.trace_error})` : '';
-    const msg = `Գɹ: ${data.proxy}${locText}${supportText}${traceWarn}`;
-    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-    showToast('زԳɹ', 'success');
+    const msg = `维护完成: 异常 ${num(d.error_count)}, 刷新 ${num(d.refreshed)}, 删除 ${num(d.deleted_ok)}, 失败 ${num(d.deleted_fail)}`;
+    if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = msg;
+    showToast(msg, 'success');
+    pollSub2ApiPoolStatus();
   } catch (e) {
-    const msg = 'ʧ: ' + e.message;
-    if (DOM.proxyPoolStatus) DOM.proxyPoolStatus.textContent = msg;
-    showToast(msg, 'error');
-  } finally {
-    DOM.proxyPoolTestBtn.disabled = false;
-    if (DOM.syncStatus) DOM.syncStatus.textContent = '';
-    DOM.proxyPoolTestBtn.textContent = oldText || 'Դȡ';
+    if (DOM.sub2apiPoolMaintainStatus) DOM.sub2apiPoolMaintainStatus.textContent = `维护失败: ${e.message}`;
+    showToast(`维护失败: ${e.message}`, 'error');
   }
+
+  DOM.sub2apiPoolMaintainBtn.disabled = false;
+  DOM.sub2apiPoolMaintainBtn.textContent = old || '维护';
 }
 
 async function testSub2ApiPoolConnection() {
+  if (!DOM.sub2apiTestPoolBtn) return;
   DOM.sub2apiTestPoolBtn.disabled = true;
-  DOM.syncStatus.textContent = '测试连接中...';
+  if (DOM.syncStatus) DOM.syncStatus.textContent = '测试连接中...';
+
   try {
-    const res = await fetch('/api/sub2api/pool/check', { method: 'POST' });
-    const data = await res.json();
-    if (data.ok) {
-      DOM.syncStatus.textContent = data.message || '连接成功';
+    const res = await apiFetch('/api/sub2api/pool/check', { method: 'POST' });
+    const d = await res.json();
+    if (d.ok) {
+      if (DOM.syncStatus) DOM.syncStatus.textContent = d.message || '连接成功';
       showToast('Sub2Api 池连接成功', 'success');
     } else {
-      DOM.syncStatus.textContent = data.message || data.detail || '连接失败';
+      const m = d.message || d.detail || '连接失败';
+      if (DOM.syncStatus) DOM.syncStatus.textContent = m;
       showToast('Sub2Api 池连接失败', 'error');
     }
   } catch (e) {
-    DOM.syncStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.sub2apiTestPoolBtn.disabled = false;
+    if (DOM.syncStatus) DOM.syncStatus.textContent = `连接失败: ${e.message}`;
+    showToast(`连接失败: ${e.message}`, 'error');
   }
+
+  DOM.sub2apiTestPoolBtn.disabled = false;
 }
-
-// ==========================================
-// 邮箱配置（多选）
-// ==========================================
-
 function initMailCheckboxes() {
-  document.querySelectorAll('.mail-provider-check').forEach(cb => {
-    cb.setAttribute('aria-expanded', cb.checked);
+  document.querySelectorAll('.mail-provider-check').forEach((cb) => {
     cb.addEventListener('change', () => {
-      const item = cb.closest('.provider-item');
-      const config = item.querySelector('.provider-config');
-      if (config) config.style.display = cb.checked ? 'block' : 'none';
-      cb.setAttribute('aria-expanded', cb.checked);
+      const cfg = cb.closest('.provider-item')?.querySelector('.provider-config');
+      if (cfg) cfg.style.display = cb.checked ? 'grid' : 'none';
     });
   });
 }
 
 async function loadMailConfig() {
   try {
-    const res = await fetch('/api/mail/config');
-    const data = await res.json();
-    const providers = data.mail_providers || [data.mail_provider || 'mailtm'];
-    const configs = data.mail_provider_configs || {};
-    const strategy = data.mail_strategy || 'round_robin';
+    const res = await apiFetch('/api/mail/config');
+    const d = await res.json();
+    if (!res.ok) return;
 
-    // 设置 checkboxes
-    document.querySelectorAll('.mail-provider-check').forEach(cb => {
-      const name = cb.value;
-      cb.checked = providers.includes(name);
-      const item = cb.closest('.provider-item');
-      const configDiv = item.querySelector('.provider-config');
-      if (configDiv) configDiv.style.display = cb.checked ? 'block' : 'none';
+    const providers = d.mail_providers || [d.mail_provider || 'mailtm'];
+    const providerCfgs = d.mail_provider_configs || {};
 
-      // 填充 per-provider 配置
-      const pcfg = configs[name] || {};
-      item.querySelectorAll('[data-key]').forEach(input => {
-        const key = input.dataset.key;
-        const previewKey = key + '_preview';
-        if (Object.prototype.hasOwnProperty.call(pcfg, key) && pcfg[key] !== null && pcfg[key] !== undefined) {
-          input.value = String(pcfg[key]);
-        } else if (pcfg[previewKey]) {
-          input.placeholder = pcfg[previewKey];
-        }
+    document.querySelectorAll('.provider-item').forEach((item) => {
+      const name = item.dataset.provider;
+      const cb = item.querySelector('.mail-provider-check');
+      const checked = providers.includes(name);
+      if (cb) cb.checked = checked;
+
+      const panel = item.querySelector('.provider-config');
+      if (panel) panel.style.display = checked ? 'grid' : 'none';
+
+      const cfg = providerCfgs[name] || {};
+      item.querySelectorAll('[data-key]').forEach((el) => {
+        const key = el.dataset.key;
+        const previewKey = `${key}_preview`;
+        if (Object.prototype.hasOwnProperty.call(cfg, key)) el.value = cfg[key] ?? '';
+        else if (cfg[previewKey]) el.placeholder = cfg[previewKey];
       });
     });
 
-    // 兼容旧格式
-    if (!data.mail_providers && data.mail_config) {
-      const mc = data.mail_config;
-      const activeProvider = data.mail_provider || 'mailtm';
-      const item = document.querySelector(`.provider-item[data-provider="${activeProvider}"]`);
+    if (DOM.mailStrategySelect) DOM.mailStrategySelect.value = d.mail_strategy || 'round_robin';
+
+    if (!d.mail_providers && d.mail_config) {
+      const item = document.querySelector(`.provider-item[data-provider="${d.mail_provider || 'mailtm'}"]`);
       if (item) {
-        const apiBaseInput = item.querySelector('[data-key="api_base"]');
-        if (apiBaseInput && mc.api_base) apiBaseInput.value = mc.api_base;
+        item.querySelectorAll('[data-key]').forEach((el) => {
+          const key = el.dataset.key;
+          if (d.mail_config[key]) el.value = d.mail_config[key];
+        });
       }
     }
+  } catch {}
+}
 
-    if (DOM.mailStrategySelect) DOM.mailStrategySelect.value = strategy;
-  } catch { }
+function collectMailPayload() {
+  const providers = [];
+  const providerCfgs = {};
+
+  document.querySelectorAll('.provider-item').forEach((item) => {
+    const name = item.dataset.provider;
+    const cb = item.querySelector('.mail-provider-check');
+    if (!cb?.checked || !name) return;
+
+    providers.push(name);
+    providerCfgs[name] = {};
+
+    item.querySelectorAll('[data-key]').forEach((el) => {
+      const key = el.dataset.key;
+      const val = String(el.value || '').trim();
+      if (val) providerCfgs[name][key] = val;
+    });
+  });
+
+  const main = providers[0] || 'mailtm';
+  return {
+    mail_provider: main,
+    mail_config: { ...(providerCfgs[main] || {}) },
+    mail_providers: providers,
+    mail_provider_configs: providerCfgs,
+    mail_strategy: DOM.mailStrategySelect?.value || 'round_robin',
+  };
 }
 
 async function saveMailConfig() {
-  const checkedProviders = [];
-  const providerConfigs = {};
+  if (!DOM.mailSaveBtn) return;
+  const payload = collectMailPayload();
+  if (!payload.mail_providers.length) return showToast('请至少勾选一个邮箱提供商', 'error');
 
-  document.querySelectorAll('.mail-provider-check').forEach(cb => {
-    const name = cb.value;
-    if (cb.checked) {
-      checkedProviders.push(name);
-      const item = cb.closest('.provider-item');
-      const cfg = {};
-      item.querySelectorAll('[data-key]').forEach(input => {
-        const val = input.value.trim();
-        if (val) cfg[input.dataset.key] = val;
-      });
-      providerConfigs[name] = cfg;
-    }
-  });
-
-  if (checkedProviders.length === 0) {
-    showToast('请至少择丢个邮箱提供商', 'error');
-    return;
-  }
-
-  const strategy = DOM.mailStrategySelect ? DOM.mailStrategySelect.value : 'round_robin';
   DOM.mailSaveBtn.disabled = true;
+  if (DOM.mailStatus) DOM.mailStatus.textContent = '保存中...';
+
   try {
-    const res = await fetch('/api/mail/config', {
+    const res = await apiFetch('/api/mail/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mail_provider: checkedProviders[0],
-        mail_config: providerConfigs[checkedProviders[0]] || {},
-        mail_providers: checkedProviders,
-        mail_provider_configs: providerConfigs,
-        mail_strategy: strategy,
-      }),
+      body: JSON.stringify(payload),
     });
-    if (res.ok) {
-      showToast('邮箱配置已保存', 'success');
-      DOM.mailStatus.textContent = '配置已保存';
-    } else {
-      const data = await res.json();
-      DOM.mailStatus.textContent = data.detail || '保存失败';
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.mailStatus) DOM.mailStatus.textContent = d.detail || '保存失败';
+      return showToast(d.detail || '保存失败', 'error');
     }
+    if (DOM.mailStatus) DOM.mailStatus.textContent = '配置已保存';
+    showToast('邮箱配置已保存', 'success');
   } catch (e) {
-    DOM.mailStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.mailSaveBtn.disabled = false;
+    if (DOM.mailStatus) DOM.mailStatus.textContent = `保存失败: ${e.message}`;
+    showToast(`保存失败: ${e.message}`, 'error');
   }
+
+  DOM.mailSaveBtn.disabled = false;
 }
 
 async function testMailConnection() {
+  if (!DOM.mailTestBtn) return;
   DOM.mailTestBtn.disabled = true;
-  DOM.mailStatus.textContent = '测试中...';
+  if (DOM.mailStatus) DOM.mailStatus.textContent = '测试中...';
+
   try {
-    await saveMailConfig();
-    const res = await fetch('/api/mail/test', { method: 'POST' });
-    const data = await res.json();
-    if (data.results) {
-      const msgs = data.results.map(r => `${r.provider}: ${r.ok ? 'OK' : r.message}`);
-      DOM.mailStatus.textContent = msgs.join(' | ');
-    } else {
-      DOM.mailStatus.textContent = data.message || (data.ok ? '连接成功' : '连接失败');
+    const res = await apiFetch('/api/mail/test', { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) {
+      if (DOM.mailStatus) DOM.mailStatus.textContent = d.detail || '测试失败';
+      return showToast(d.detail || '测试失败', 'error');
     }
-    showToast(data.ok ? '邮箱测试通过' : '邮箱测试失败', data.ok ? 'success' : 'error');
+    if (DOM.mailStatus) DOM.mailStatus.textContent = d.message || (d.ok ? '连接成功' : '连接失败');
+    showToast(d.ok ? '邮箱测试通过' : '邮箱测试失败', d.ok ? 'success' : 'error');
   } catch (e) {
-    DOM.mailStatus.textContent = '请求失败: ' + e.message;
-  } finally {
-    DOM.mailTestBtn.disabled = false;
+    if (DOM.mailStatus) DOM.mailStatus.textContent = `测试失败: ${e.message}`;
+    showToast(`测试失败: ${e.message}`, 'error');
   }
-}
 
-// ==========================================
-// Toast 通知（带图标和淡出动画）
-// ==========================================
-const TOAST_ICONS = {
-  success: '&#10003;',
-  error: '&#10007;',
-  info: '&#8505;',
-};
-
-const THEME_STORAGE_KEY = 'oai_registrar_theme_v1';
-
-function initThemeSwitch() {
-  const btn = DOM.themeToggleBtn;
-  if (!btn) return;
-
-  let saved = 'dark';
-  try {
-    const value = localStorage.getItem(THEME_STORAGE_KEY);
-    if (value === 'light' || value === 'dark') saved = value;
-  } catch { }
-
-  applyTheme(saved);
-
-  btn.addEventListener('click', () => {
-    const isLight = document.body.classList.contains('theme-light');
-    const nextTheme = isLight ? 'dark' : 'light';
-    applyTheme(nextTheme);
-    try { localStorage.setItem(THEME_STORAGE_KEY, nextTheme); } catch { }
-  });
-}
-
-function applyTheme(theme) {
-  const isLight = theme === 'light';
-  document.body.classList.toggle('theme-light', isLight);
-  updateThemeToggleLabel(isLight);
-}
-
-function updateThemeToggleLabel(isLight) {
-  const btn = DOM.themeToggleBtn;
-  if (!btn) return;
-  const currentLabel = isLight ? '\u660e\u4eae' : '\u9ed1\u6697';
-  const nextLabel = isLight ? '\u9ed1\u6697' : '\u660e\u4eae';
-  const toggleLabel = btn.querySelector('.theme-toggle-label');
-  if (toggleLabel) toggleLabel.textContent = currentLabel;
-  btn.setAttribute('aria-label', `\u5207\u6362\u5230${nextLabel}\u4e3b\u9898`);
-  btn.setAttribute('title', `\u5207\u6362\u5230${nextLabel}\u4e3b\u9898`);
+  DOM.mailTestBtn.disabled = false;
 }
 
 function showToast(msg, type = 'info') {
-  const container = $('toastContainer');
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  const iconHtml = TOAST_ICONS[type] || TOAST_ICONS.info;
-  toast.innerHTML = `<span class="toast-icon">${iconHtml}</span><span>${escapeHtml(msg)}</span>`;
-  container.appendChild(toast);
+  const box = $('toastContainer');
+  if (!box) return;
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.innerHTML = `<span class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.info}</span><span>${esc(msg)}</span>`;
+  box.appendChild(node);
   setTimeout(() => {
-    toast.style.animation = 'toast-out .25s var(--ease-spring) forwards';
-    toast.addEventListener('animationend', () => toast.remove());
+    node.style.animation = 'toast-out .22s ease forwards';
+    node.addEventListener('animationend', () => node.remove(), { once: true });
   }, 3200);
 }
-
-// ==========================================
-// 工具函数
-// ==========================================
-function escapeHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function cssEscape(str) {
-  return str.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-// ==========================================
-// 拖拽调整栏宽（localStorage 持久化）
-// ==========================================
-(function initResizable() {
-  const STORAGE_KEY = 'oai_registrar_layout_v3';
-  const shell = document.querySelector('.app-shell');
-  const resizeLeft = document.getElementById('resizeLeft');
-  const resizeRight = document.getElementById('resizeRight');
-  if (!shell) return;
-
-  function getTrackPx(index) {
-    const tracks = getComputedStyle(shell).gridTemplateColumns.match(/[\d.]+px/g) || [];
-    const val = tracks[index] ? parseFloat(tracks[index]) : NaN;
-    return Number.isFinite(val) ? val : NaN;
-  }
-
-  function loadLayout() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (!saved) return;
-      const maxW = shell.getBoundingClientRect().width || window.innerWidth;
-      if (saved.left && saved.left >= 220 && saved.left <= maxW * 0.4) {
-        shell.style.setProperty('--col-left', saved.left + 'px');
-      }
-      if (saved.right && saved.right >= 260 && saved.right <= maxW * 0.4) {
-        shell.style.setProperty('--col-right', saved.right + 'px');
-      }
-    } catch { }
-  }
-
-  function saveLayout() {
-    const left = getTrackPx(0);
-    const right = getTrackPx(4);
-    const data = {};
-    if (Number.isFinite(left) && left > 0) data.left = left;
-    if (Number.isFinite(right) && right > 0) data.right = right;
-    if (Object.keys(data).length) {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { }
-    }
-  }
-
-  function initHandle(handle, prop, minW, getStart) {
-    if (!handle) return;
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      document.body.classList.add('resizing');
-      handle.classList.add('active');
-      const startX = e.clientX;
-      const startVal = getStart();
-      const totalW = shell.getBoundingClientRect().width;
-
-      const onMove = (ev) => {
-        const dx = ev.clientX - startX;
-        const delta = prop === '--col-left' ? dx : -dx;
-        shell.style.setProperty(prop, Math.max(minW, Math.min(startVal + delta, totalW * 0.4)) + 'px');
-      };
-      const onUp = () => {
-        document.body.classList.remove('resizing');
-        handle.classList.remove('active');
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        saveLayout();
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  }
-
-  initHandle(resizeLeft, '--col-left', 220, () => getTrackPx(0) || 280);
-  initHandle(resizeRight, '--col-right', 260, () => getTrackPx(4) || 340);
-
-  loadLayout();
-})();
-
