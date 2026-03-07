@@ -9,6 +9,15 @@
     { id: 'duckmail', label: 'DuckMail' },
     { id: 'cloudflare_temp_email', label: 'Cloudflare Temp Email' }
   ];
+  const BRIDGE_ROUTE_HASH = '#/orchestrator';
+  const BRIDGE_NAV_ID = 'opa-orchestrator-nav-item';
+  const BRIDGE_NAV_WRAP_ID = 'opa-orchestrator-nav-wrap';
+  const BRIDGE_HOST_ID = 'opa-orchestrator-route-host';
+
+  let bridgeRoot = null;
+  let bridgeSyncTimer = null;
+  let bridgeObserver = null;
+  let bridgePrevActive = false;
 
   const qs = (id) => document.getElementById(id);
   const qsa = (selector) => Array.from(document.querySelectorAll(selector));
@@ -276,6 +285,8 @@
       </div>
     `;
     document.body.appendChild(root);
+    bridgeRoot = root;
+    root.style.display = 'none';
 
     const picks = qs('opaMailProviderPicks');
     picks.innerHTML = MAIL_PROVIDERS.map((p) => (
@@ -476,10 +487,133 @@
     }
   }
 
+  function isBridgeRoute() {
+    const hash = String(window.location.hash || '');
+    return hash === BRIDGE_ROUTE_HASH || hash.startsWith(BRIDGE_ROUTE_HASH + '/') || hash.startsWith(BRIDGE_ROUTE_HASH + '?');
+  }
+
+  function findSidebarNavContainer() {
+    const sidebar = document.querySelector('aside[class*="sidebar"]') || document.querySelector('aside') || document.querySelector('[class*="sidebar"]');
+    if (!sidebar) return null;
+    return sidebar.querySelector('[class*="nav-section"]') || sidebar.querySelector('nav') || sidebar;
+  }
+
+  function ensureBridgeNavItem() {
+    const navContainer = findSidebarNavContainer();
+    if (!navContainer) return;
+
+    let item = qs(BRIDGE_NAV_ID);
+    if (!item || !document.contains(item)) {
+      const sample = navContainer.querySelector('a[href^="#/"], a, button');
+      const wrapSample = sample && sample.parentElement && sample.parentElement !== navContainer ? sample.parentElement : null;
+
+      item = document.createElement('a');
+      item.id = BRIDGE_NAV_ID;
+      item.href = BRIDGE_ROUTE_HASH;
+      item.className = sample && sample.className ? sample.className : '';
+      item.innerHTML = '<span>注册机</span>';
+
+      if (wrapSample) {
+        const wrap = document.createElement(wrapSample.tagName || 'div');
+        wrap.id = BRIDGE_NAV_WRAP_ID;
+        wrap.className = wrapSample.className || '';
+        wrap.appendChild(item);
+        navContainer.appendChild(wrap);
+      } else {
+        navContainer.appendChild(item);
+      }
+    }
+
+    item.classList.toggle('opa-nav-active', isBridgeRoute());
+    item.setAttribute('aria-current', isBridgeRoute() ? 'page' : 'false');
+  }
+
+  function findMainContainer() {
+    const root = qs('root');
+    if (!root) return null;
+    const selectors = [
+      'main[class*="main-content"]',
+      'main[class*="mainContent"]',
+      'main',
+      '[class*="main-content"]',
+      '[class*="mainContent"]',
+      '[class*="content"]'
+    ];
+    for (const selector of selectors) {
+      const list = Array.from(root.querySelectorAll(selector));
+      for (const el of list) {
+        if (!(el instanceof HTMLElement)) continue;
+        if (el.closest('aside')) continue;
+        return el;
+      }
+    }
+    return root;
+  }
+
+  function ensureBridgeHost() {
+    const main = findMainContainer();
+    if (!main) return null;
+    main.classList.add('opa-main-container');
+    let host = qs(BRIDGE_HOST_ID);
+    if (!host || host.parentElement !== main) {
+      if (host && host.parentElement) host.parentElement.removeChild(host);
+      host = document.createElement('div');
+      host.id = BRIDGE_HOST_ID;
+      host.className = 'opa-route-host';
+      main.appendChild(host);
+    }
+    return host;
+  }
+
+  function applyBridgeRouteVisibility() {
+    if (!bridgeRoot) return;
+    ensureBridgeNavItem();
+    const active = isBridgeRoute();
+    const host = ensureBridgeHost();
+    if (host && bridgeRoot.parentElement !== host) {
+      host.appendChild(bridgeRoot);
+    }
+    if (host && host.parentElement) {
+      host.parentElement.classList.toggle('opa-route-active', active);
+    }
+
+    bridgeRoot.style.display = active ? '' : 'none';
+    const panel = qs('opaPanel');
+    if (panel) panel.classList.add('open');
+
+    if (active && !bridgePrevActive) {
+      loadProxyConfig();
+      loadPoolConfig();
+      loadMailConfig();
+      refreshStatus();
+    }
+    bridgePrevActive = active;
+  }
+
+  function scheduleBridgeSync() {
+    if (bridgeSyncTimer) return;
+    bridgeSyncTimer = window.setTimeout(() => {
+      bridgeSyncTimer = null;
+      applyBridgeRouteVisibility();
+    }, 80);
+  }
+
+  function startBridgeObserver() {
+    if (bridgeObserver) return;
+    bridgeObserver = new MutationObserver(() => {
+      scheduleBridgeSync();
+    });
+    bridgeObserver.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('hashchange', scheduleBridgeSync);
+    window.addEventListener('popstate', scheduleBridgeSync);
+  }
+
   function bind() {
     const panel = qs('opaPanel');
-    qs('opaToggle').addEventListener('click', () => panel.classList.toggle('open'));
-    qs('opaClose').addEventListener('click', () => panel.classList.remove('open'));
+    const toggle = qs('opaToggle');
+    const close = qs('opaClose');
+    if (toggle) toggle.addEventListener('click', () => panel.classList.toggle('open'));
+    if (close) close.addEventListener('click', () => panel.classList.remove('open'));
 
     bindSecretEye('opaCpaToken', 'opaCpaTokenEye');
     bindSecretEye('opaMoemailApiKey', 'opaMoemailApiKeyEye');
@@ -696,6 +830,11 @@
     loadMailConfig();
     refreshStatus();
     setInterval(refreshStatus, 3000);
+    applyBridgeRouteVisibility();
+    startBridgeObserver();
+    scheduleBridgeSync();
+    window.setTimeout(scheduleBridgeSync, 300);
+    window.setTimeout(scheduleBridgeSync, 1200);
   }
 
   if (document.readyState === 'loading') {

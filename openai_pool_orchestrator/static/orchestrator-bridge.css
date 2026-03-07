@@ -1,32 +1,225 @@
-﻿.opa-bridge-root{position:fixed;right:16px;bottom:16px;z-index:2147483000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
-.opa-bridge-toggle{border:1px solid #4f46e5;background:#4338ca;color:#fff;border-radius:999px;padding:10px 14px;font-size:13px;cursor:pointer;box-shadow:0 8px 24px rgba(67,56,202,.35)}
-.opa-bridge-toggle:hover{background:#3730a3}
-.opa-bridge-panel{position:fixed;right:16px;bottom:64px;width:min(520px,calc(100vw - 24px));max-height:calc(100vh - 90px);overflow:auto;background:#fff;border:1px solid #d1d5db;border-radius:14px;box-shadow:0 18px 44px rgba(2,6,23,.26);display:none}
-.opa-bridge-panel.open{display:block}
-.opa-bridge-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:1}
-.opa-bridge-head h3{margin:0;font-size:14px;color:#111827}
-.opa-bridge-close{border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;padding:4px 8px;cursor:pointer}
-.opa-bridge-body{padding:12px;display:grid;gap:10px}
-.opa-bridge-card{border:1px solid #e5e7eb;border-radius:10px;padding:10px;display:grid;gap:8px}
-.opa-bridge-card h4{margin:0;font-size:13px;color:#111827}
-.opa-bridge-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.opa-bridge-field{display:grid;gap:4px}
-.opa-bridge-field label{font-size:12px;color:#6b7280}
-.opa-bridge-field input,.opa-bridge-field select,.opa-bridge-field textarea{border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:13px;outline:none;background:#fff}
-.opa-bridge-field input:focus,.opa-bridge-field select:focus,.opa-bridge-field textarea:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
-.opa-bridge-check{display:flex;align-items:center;gap:8px;font-size:13px;color:#111827}
-.opa-bridge-actions{display:flex;flex-wrap:wrap;gap:8px}
-.opa-bridge-btn{border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;font-size:12px;background:#fff;cursor:pointer}
-.opa-bridge-btn.primary{background:#2563eb;border-color:#2563eb;color:#fff}
-.opa-bridge-btn.warn{background:#f59e0b;border-color:#f59e0b;color:#fff}
-.opa-bridge-status{font-size:12px;color:#374151;word-break:break-word}
-.opa-secret-wrap{position:relative}
-.opa-secret-wrap input{padding-right:56px}
-.opa-secret-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:1px solid #d1d5db;background:#fff;border-radius:999px;padding:2px 7px;font-size:11px;cursor:pointer}
-.opa-provider-picks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.opa-provider-pick{padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb}
-.opa-provider-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.opa-provider-card{border:1px solid #e5e7eb;border-radius:8px;padding:8px;display:grid;gap:8px}
-.opa-provider-card h5{margin:0;font-size:12px;color:#111827}
-@media (max-width:640px){.opa-bridge-panel{right:8px;bottom:56px;width:calc(100vw - 16px)}}
-@media (max-width:640px){.opa-provider-grid,.opa-provider-picks,.opa-bridge-grid{grid-template-columns:1fr}}
+.opa-main-container {
+  position: relative;
+}
+
+.opa-route-host {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.opa-route-host .opa-bridge-root {
+  pointer-events: auto;
+}
+
+.opa-route-active {
+  overflow: hidden;
+}
+
+#opa-orchestrator-nav-item {
+  cursor: pointer;
+}
+
+#opa-orchestrator-nav-item.opa-nav-active {
+  background: rgba(139, 134, 128, 0.15) !important;
+}
+
+.opa-bridge-root {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.opa-bridge-toggle,
+.opa-bridge-close {
+  display: none !important;
+}
+
+.opa-bridge-panel {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+  display: block;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-primary, #ffffff);
+}
+
+.opa-bridge-panel.open {
+  display: block;
+}
+
+.opa-bridge-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary, #ffffff);
+  z-index: 2;
+}
+
+.opa-bridge-head h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary, #111827);
+}
+
+.opa-bridge-body {
+  padding: 16px 18px 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.opa-bridge-card {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+.opa-bridge-card h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary, #111827);
+}
+
+.opa-bridge-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.opa-bridge-field {
+  display: grid;
+  gap: 6px;
+}
+
+.opa-bridge-field label {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.opa-bridge-field input,
+.opa-bridge-field select,
+.opa-bridge-field textarea {
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  background: var(--bg-primary, #fff);
+}
+
+.opa-bridge-field input:focus,
+.opa-bridge-field select:focus,
+.opa-bridge-field textarea:focus {
+  border-color: #8b8680;
+  box-shadow: 0 0 0 3px rgba(139, 134, 128, 0.18);
+}
+
+.opa-bridge-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary, #111827);
+}
+
+.opa-bridge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opa-bridge-btn {
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 7px 11px;
+  font-size: 12px;
+  background: var(--bg-primary, #fff);
+  cursor: pointer;
+}
+
+.opa-bridge-btn.primary {
+  background: #8b8680;
+  border-color: #8b8680;
+  color: #fff;
+}
+
+.opa-bridge-btn.warn {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #fff;
+}
+
+.opa-bridge-status {
+  font-size: 12px;
+  color: var(--text-secondary, #374151);
+  word-break: break-word;
+}
+
+.opa-secret-wrap {
+  position: relative;
+}
+
+.opa-secret-wrap input {
+  padding-right: 56px;
+}
+
+.opa-secret-eye {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-primary, #fff);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.opa-provider-picks,
+.opa-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.opa-provider-pick,
+.opa-provider-card {
+  padding: 8px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-primary, #fff);
+}
+
+.opa-provider-card h5 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-primary, #111827);
+}
+
+@media (max-width: 768px) {
+  .opa-bridge-body {
+    padding: 12px;
+  }
+
+  .opa-bridge-grid,
+  .opa-provider-picks,
+  .opa-provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
