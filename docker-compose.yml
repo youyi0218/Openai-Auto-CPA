@@ -1,0 +1,37 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openai-pool-orchestrator:latest
+    container_name: openai-pool-orchestrator
+    restart: unless-stopped
+    ports:
+      - "18421:18421"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      - cliproxyapi
+
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:latest
+    container_name: cliproxyapi
+    restart: unless-stopped
+    ports:
+      - "8317:8317"
+    volumes:
+      - ./deploy/cpa/config.yaml:/app/config.yaml:ro
+      - ./deploy/cpa/auth:/root/.cli-proxy-api
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: cliproxyapi-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --label-enable --cleanup --interval 300 cliproxyapi

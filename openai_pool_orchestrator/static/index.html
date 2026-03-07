@@ -1,0 +1,634 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenAI Pool Orchestrator</title>
+  <meta name="description" content="OpenAI 璐﹀彿姹犵紪鎺掑櫒 鈥?Web 鍙鍖栫晫闈? />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+
+  <!-- ========== 澶撮儴 ========== -->
+  <header>
+    <div class="header-brand">
+      <div class="logo">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
+      </div>
+      <h1>Pool Orchestrator</h1>
+      <span class="version">v5.0</span>
+    </div>
+    <div class="header-right">
+      <div id="headerSub2apiChip" class="pool-chip status-idle" title="Sub2Api 姹犵姸鎬?>
+        <span class="pool-chip-name">Sub2Api</span>
+        <span id="headerSub2apiLabel" class="pool-chip-value">-- / --</span>
+        <span id="headerSub2apiDelta" class="pool-chip-delta">--</span>
+        <div class="pool-chip-track">
+          <div id="headerSub2apiBar" class="pool-chip-fill" style="width:0%"></div>
+        </div>
+      </div>
+      <div id="headerCpaChip" class="pool-chip status-idle" title="CPA 姹犵姸鎬?>
+        <span class="pool-chip-name">CPA</span>
+        <span id="headerCpaLabel" class="pool-chip-value">-- / --</span>
+        <span id="headerCpaDelta" class="pool-chip-delta">--</span>
+        <div class="pool-chip-track">
+          <div id="headerCpaBar" class="pool-chip-fill" style="width:0%"></div>
+        </div>
+      </div>
+      <div id="statusBadge" class="status-badge idle">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">绌洪棽</span>
+      </div>
+      <button id="themeToggleBtn" class="theme-toggle-btn" type="button" aria-label="鍒囨崲鍒版槑浜富棰? title="鍒囨崲鍒版槑浜富棰?>
+        <span class="theme-toggle-icon" aria-hidden="true"></span>
+        <span class="theme-toggle-label">榛戞殫</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========== 杩涘害鏉?========== -->
+  <div class="progress-bar">
+    <div id="progressFill" class="progress-fill"></div>
+  </div>
+
+  <!-- ========== Tab 瀵艰埅 鈥?iOS Segmented Control ========== -->
+  <nav class="tab-nav" role="tablist">
+    <div class="segmented-control">
+      <div class="segment-indicator" id="segmentIndicator"></div>
+      <button class="tab-btn active" data-tab="tabDashboard" role="tab" aria-selected="true" aria-controls="tabDashboard">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>浠〃鐩?/span>
+      </button>
+      <button class="tab-btn" data-tab="tabConfig" role="tab" aria-selected="false" aria-controls="tabConfig">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span>閰嶇疆涓績</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ========== 浠〃鐩?Tab ========== -->
+  <div id="tabDashboard" class="tab-panel active" role="tabpanel">
+
+    <div class="app-shell">
+
+      <!-- ===== 宸︽爮锛氭帶鍒堕潰鏉?===== -->
+      <aside class="sidebar">
+
+        <!-- 浠ｇ悊閰嶇疆 -->
+        <div class="panel-section">
+          <div class="section-title">浠ｇ悊閰嶇疆</div>
+          <div class="proxy-row">
+            <div class="input-wrapper">
+              <input type="text" id="proxyInput" placeholder="http://127.0.0.1:7897" value="http://127.0.0.1:7897"
+                autocomplete="off" spellcheck="false" />
+            </div>
+            <button id="checkProxyBtn" class="btn btn-ghost btn-sm">妫€娴?/button>
+            <button id="saveProxyBtn" class="btn btn-ghost btn-sm">淇濆瓨</button>
+          </div>
+          <div id="proxyStatus" class="proxy-status">
+            <span>鐐瑰嚮銆屾娴嬨€嶉獙璇佷唬鐞嗗彲鐢ㄦ€?/span>
+          </div>
+        </div>
+
+        <!-- 浠诲姟鎺у埗 -->
+        <div class="panel-section">
+          <div class="section-title">浠诲姟鎺у埗</div>
+          <div class="toggle-row">
+            <label class="ios-toggle-label" for="multithreadCheck">
+              <span class="ios-toggle">
+                <input type="checkbox" id="multithreadCheck" />
+                <span class="toggle-track"></span>
+              </span>
+              <span>澶氱嚎绋?/span>
+            </label>
+            <div class="thread-count-wrap">
+              <label>绾跨▼</label>
+              <input type="number" id="threadCountInput" value="3" min="1" max="10" />
+            </div>
+          </div>
+          <div class="toggle-row">
+            <label class="ios-toggle-label" for="autoRegisterCheck">
+              <span class="ios-toggle">
+                <input type="checkbox" id="autoRegisterCheck" />
+                <span class="toggle-track"></span>
+              </span>
+              <span>姹犱笉瓒宠嚜鍔ㄦ敞鍐?/span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label class="ios-toggle-label" for="localAutoMaintainCheck">
+              <span class="ios-toggle">
+                <input type="checkbox" id="localAutoMaintainCheck" />
+                <span class="toggle-track"></span>
+              </span>
+              <span>本地定时测活删号</span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <div class="thread-count-wrap">
+              <label>期望数量</label>
+              <input type="number" id="expectedTokenCountInput" value="0" min="0" />
+            </div>
+            <div class="thread-count-wrap">
+              <label>测活间隔(分)</label>
+              <input type="number" id="localMaintainIntervalInput" value="30" min="5" />
+            </div>
+          </div>
+          <div class="control-buttons">
+            <button id="btnStart" class="btn btn-success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              鍚姩
+            </button>
+            <button id="btnStop" class="btn btn-danger" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              鍋滄
+            </button>
+          </div>
+        </div>
+
+        <!-- 缁熻 -->
+        <div class="panel-section">
+          <div class="section-title">缁熻</div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div id="statSuccess" class="stat-value green">0</div>
+              <div class="stat-label">鎴愬姛</div>
+            </div>
+            <div class="stat-card">
+              <div id="statFail" class="stat-value red">0</div>
+              <div class="stat-label">澶辫触</div>
+            </div>
+            <div class="stat-card span-2">
+              <div id="statTotal" class="stat-value blue">0</div>
+              <div class="stat-label">鎬昏</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 娉ㄥ唽姝ラ杩借釜 -->
+        <div class="panel-section">
+          <div class="section-title">娉ㄥ唽杩涘害</div>
+          <div id="stepsTracker" class="steps-tracker"></div>
+        </div>
+
+      </aside>
+
+      <!-- 鎷栨嫿鍒嗛殧鏉★紙宸︼級 -->
+      <div class="resize-handle" id="resizeLeft"></div>
+
+      <!-- ===== 涓爮锛氭棩蹇楅潰鏉?===== -->
+      <main class="main-area">
+        <div class="log-panel">
+          <div class="log-header">
+            <div class="log-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              <span>瀹炴椂鏃ュ織</span>
+              <span id="logCount" class="log-count-badge">0</span>
+            </div>
+            <div class="log-actions">
+              <label class="ios-toggle-label log-autoscroll-label" for="autoScrollCheck">
+                <span class="ios-toggle ios-toggle-sm">
+                  <input type="checkbox" id="autoScrollCheck" checked />
+                  <span class="toggle-track"></span>
+                </span>
+                <span>鑷姩婊氬姩</span>
+              </label>
+              <button id="clearLogBtn" class="btn btn-ghost btn-sm">娓呯┖</button>
+            </div>
+          </div>
+          <div id="logBody" class="log-body">
+            <div class="log-entry log-placeholder">
+              绛夊緟浠诲姟鍚姩...
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- 鎷栨嫿鍒嗛殧鏉★紙鍙筹級 -->
+      <div class="resize-handle" id="resizeRight"></div>
+
+      <!-- ===== 鍙虫爮锛氭睜鐘舵€?+ Token ===== -->
+      <aside class="data-panel">
+
+        <!-- Sub2Api 璐﹀彿姹?-->
+        <div class="pool-section-header">Sub2Api 璐﹀彿姹?/div>
+        <div class="pool-overview">
+          <div class="pool-stat-card">
+            <div id="sub2apiPoolTotal" class="stat-value blue">--</div>
+            <div class="stat-label">鎬昏处鍙?/div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="sub2apiPoolNormal" class="stat-value green">--</div>
+            <div class="stat-label">姝ｅ父</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="sub2apiPoolError" class="stat-value red">--</div>
+            <div class="stat-label">寮傚父</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="sub2apiPoolThreshold" class="stat-value muted">--</div>
+            <div class="stat-label">鐩爣</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="sub2apiPoolPercent" class="stat-value">--</div>
+            <div class="stat-label">鍏呰冻鐜?/div>
+          </div>
+          <div class="pool-action-group">
+            <button id="sub2apiPoolRefreshBtn" class="btn btn-ghost btn-sm">鍒锋柊</button>
+            <button id="sub2apiPoolMaintainBtn" class="btn btn-primary btn-sm">缁存姢</button>
+            <span id="sub2apiPoolMaintainStatus" class="inline-status"></span>
+          </div>
+        </div>
+
+        <!-- CPA 璐﹀彿姹?-->
+        <div class="pool-section-header">CPA 璐﹀彿姹?/div>
+        <div class="pool-overview">
+          <div class="pool-stat-card">
+            <div id="poolTotal" class="stat-value blue">--</div>
+            <div class="stat-label">鎬昏处鍙?/div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="poolCandidates" class="stat-value green">--</div>
+            <div class="stat-label">姝ｅ父</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="poolError" class="stat-value red">--</div>
+            <div class="stat-label">寮傚父</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="poolThreshold" class="stat-value muted">--</div>
+            <div class="stat-label">鐩爣</div>
+          </div>
+          <div class="pool-stat-card">
+            <div id="poolPercent" class="stat-value">--</div>
+            <div class="stat-label">鍏呰冻鐜?/div>
+          </div>
+          <div class="pool-action-group">
+            <button id="poolRefreshBtn" class="btn btn-ghost btn-sm">鍒锋柊</button>
+            <button id="poolMaintainBtn" class="btn btn-primary btn-sm">缁存姢</button>
+            <span id="poolMaintainStatus" class="inline-status"></span>
+          </div>
+        </div>
+
+        <!-- Token 琛ㄦ牸 -->
+        <div class="pool-table-wrap">
+          <div class="pool-table-header">
+            <div class="log-title">
+              <span>鏈湴 Token</span>
+              <span id="poolTokenCount" class="log-count-badge">0</span>
+            </div>
+            <div id="poolRecentTokenTotal" class="token-summary">近期总Token: 0</div>
+            <div style="display:flex;gap:6px;">
+              <button id="poolCopyRtBtn" class="btn btn-ghost btn-sm">澶嶅埗 RT</button>
+              <button id="poolPwSyncBtn" class="btn btn-primary btn-sm">鎵归噺瀵煎叆</button>
+            </div>
+          </div>
+          <div class="token-filter-row">
+            <select id="tokenFilterStatus" class="token-filter-select">
+              <option value="all">鍏ㄩ儴</option>
+              <option value="synced">浠呭凡瀵煎叆</option>
+              <option value="unsynced">浠呮湭瀵煎叆</option>
+              <option value="cpa">浠?CPA</option>
+              <option value="sub2api">浠?Sub2Api</option>
+              <option value="both">CPA + Sub2Api</option>
+            </select>
+            <input id="tokenFilterKeyword" type="text" placeholder="绛涢€夐偖绠?鏂囦欢鍚? />
+            <button id="tokenFilterApplyBtn" class="btn btn-ghost btn-sm">绛涢€?/button>
+            <button id="tokenFilterResetBtn" class="btn btn-ghost btn-sm">閲嶇疆</button>
+          </div>
+          <div id="poolTokenList" class="token-list">
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              </div>
+              <span>鏆傛棤 Token</span>
+            </div>
+          </div>
+        </div>
+
+      </aside>
+
+    </div>
+
+  </div>
+
+  <!-- ========== 閰嶇疆涓績 Tab ========== -->
+  <div id="tabConfig" class="tab-panel" role="tabpanel">
+    <div class="config-page">
+
+      <!-- 鍏ㄥ眬涓婁紶绛栫暐 -->
+      <div class="config-card collapsible open" style="grid-column: span 2;">
+        <div class="collapsible-trigger">
+          <span>鍏ㄥ眬涓婁紶绛栫暐</span>
+          <span class="collapse-icon">鈻?/span>
+        </div>
+        <div class="collapsible-body">
+          <div class="config-field" style="max-width:720px;">
+            <label>涓婁紶绛栫暐</label>
+            <select id="uploadMode">
+              <option value="snapshot">涓茶琛ュ钩鍙帮紙鍏圕PA鍚嶴ub2Api锛?/option>
+              <option value="decoupled">鍙屽钩鍙板悓浼狅紙鍗曡处鍙峰弻涓婁紶锛?/option>
+            </select>
+            <div class="config-hint">
+              涓茶妯″紡鏇翠繚瀹堬紱骞惰妯″紡浼氳鍗曡处鍙峰苟鍙戜笂浼犲埌涓や釜骞冲彴銆傚綋鍓嶄换鍔¤繍琛屼腑鍒囨崲绛栫暐锛屽皢鍦ㄤ笅杞换鍔＄敓鏁堛€?
+            </div>
+          </div>
+          <div class="config-actions" style="margin-top:8px;">
+            <button id="uploadModeSaveBtn" class="btn btn-primary btn-sm">淇濆瓨绛栫暐</button>
+            <span id="uploadModeStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 璇锋眰浠ｇ悊姹犻厤缃?-->
+      <div class="config-card collapsible open" style="grid-column: span 2;">
+        <div class="collapsible-trigger">
+          <span>璇锋眰浠ｇ悊姹犻厤缃?/span>
+          <span class="collapse-icon">鈻?/span>
+        </div>
+        <div class="collapsible-body">
+          <div class="config-hint" style="margin-top:0;">
+            Select provider type. ZenProxy uses api_key/count/country; Dreamy socks5-proxy and docker-warp-socks use fixed proxy URL.
+          </div>
+          <div class="toggle-row" style="margin-top:10px;">
+            <label class="ios-toggle-label" for="proxyPoolEnabled">
+              <span class="ios-toggle ios-toggle-sm">
+                <input type="checkbox" id="proxyPoolEnabled" />
+                <span class="toggle-track"></span>
+              </span>
+              <span>鍚敤璇锋眰鍓嶄唬鐞嗘睜</span>
+            </label>
+          </div>
+          <div class="config-field">
+            <label>代理池类型</label>
+            <select id="proxyPoolProvider">
+              <option value="zenproxy_api">ZenProxy API</option>
+              <option value="dreamy_socks5_pool">Dreamy socks5-proxy</option>
+              <option value="docker_warp_socks">docker-warp-socks</option>
+            </select>
+          </div>
+          <div class="config-field">
+            <label id="proxyPoolApiUrlLabel">Fetch API URL</label>
+            <input type="text" id="proxyPoolApiUrl" value="https://zenproxy.top/api/fetch" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="config-row" id="proxyPoolZenAuthRow">
+            <div class="config-field" style="flex:1;">
+              <label>璁よ瘉鏂瑰紡</label>
+              <select id="proxyPoolAuthMode">
+                <option value="query">Query 鍙傛暟</option>
+                <option value="header">Header Bearer</option>
+              </select>
+            </div>
+            <div class="config-field" style="flex:1;">
+              <label>API Key锛堢暀绌哄垯淇濇寔鍘熷€硷級</label>
+              <input type="password" id="proxyPoolApiKey" placeholder="19c0ec43-8f76-4c97-81bc-bcda059eeba4" autocomplete="off" />
+            </div>
+          </div>
+          <div class="config-row" id="proxyPoolZenFilterRow">
+            <div class="config-field" style="max-width:180px;">
+              <label>Count</label>
+              <input type="number" id="proxyPoolCount" value="1" min="1" max="20" />
+            </div>
+            <div class="config-field" style="max-width:180px;">
+              <label>Country</label>
+              <input type="text" id="proxyPoolCountry" value="US" maxlength="8" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+          <div class="config-actions">
+            <button id="proxyPoolTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯浠ｇ悊姹犲彇鍙?/button>
+            <button id="proxyPoolSaveBtn" class="btn btn-primary btn-sm">淇濆瓨浠ｇ悊姹犻厤缃?/button>
+            <span id="proxyPoolStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPA 骞冲彴閰嶇疆 -->
+      <div class="config-card collapsible open">
+        <div class="collapsible-trigger">
+          <span>CPA 骞冲彴閰嶇疆</span>
+          <span class="collapse-icon">鈻?/span>
+        </div>
+        <div class="collapsible-body">
+          <div class="config-field">
+            <label>Base URL</label>
+            <input type="text" id="cpaBaseUrl" placeholder="https://your-cpa-server.com" autocomplete="off"
+              spellcheck="false" />
+          </div>
+          <div class="config-field">
+            <label>Token</label>
+            <input type="password" id="cpaToken" placeholder="CPA 鐧诲綍瀵嗙爜" autocomplete="off" />
+          </div>
+          <div class="config-row">
+            <div class="config-field" style="flex:1;">
+              <label>鐩爣闃堝€?/label>
+              <input type="number" id="cpaMinCandidates" value="800" min="1" />
+            </div>
+            <div class="config-field" style="flex:1;">
+              <label>浣跨敤鐜囬槇鍊?%)</label>
+              <input type="number" id="cpaUsedPercent" value="95" min="1" max="100" />
+            </div>
+          </div>
+          <div class="config-row" style="margin-top:10px;">
+            <div class="config-field" style="flex:1;">
+              <label class="ios-toggle-label" for="cpaAutoMaintain">
+                <span class="ios-toggle ios-toggle-sm">
+                  <input type="checkbox" id="cpaAutoMaintain" />
+                  <span class="toggle-track"></span>
+                </span>
+                <span>鑷姩缁存姢</span>
+              </label>
+            </div>
+            <div class="config-field" style="flex:1;">
+              <label>闂撮殧(鍒嗛挓)</label>
+              <input type="number" id="cpaInterval" value="30" min="5" />
+            </div>
+          </div>
+          <div class="config-actions">
+            <button id="cpaTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
+            <button id="cpaSaveBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <span id="cpaStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub2Api 骞冲彴閰嶇疆 -->
+      <div class="config-card collapsible open">
+        <div class="collapsible-trigger">
+          <span>Sub2Api 骞冲彴閰嶇疆</span>
+          <span class="collapse-icon">鈻?/span>
+        </div>
+        <div class="collapsible-body">
+          <div class="config-field">
+            <label>骞冲彴鍦板潃</label>
+            <input type="text" id="sub2apiBaseUrl" value="" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="config-row">
+            <div class="config-field" style="flex:1;">
+              <label>绠＄悊鍛橀偖绠?/label>
+              <input type="text" id="sub2apiEmail" value="" autocomplete="off" placeholder="admin@example.com" />
+            </div>
+            <div class="config-field" style="flex:1;">
+              <label>瀵嗙爜</label>
+              <input type="password" id="sub2apiPassword" value="" autocomplete="off" />
+            </div>
+          </div>
+          <div class="toggle-row" style="margin-top:6px;">
+            <label class="ios-toggle-label" for="autoSyncCheck">
+              <span class="ios-toggle ios-toggle-sm">
+                <input type="checkbox" id="autoSyncCheck" checked />
+                <span class="toggle-track"></span>
+              </span>
+              <span>娉ㄥ唽鍚庤嚜鍔ㄥ鍏?/span>
+            </label>
+          </div>
+          <div class="config-row" style="margin-top:10px;">
+            <div class="config-field" style="flex:1;">
+              <label>鐩爣闃堝€?/label>
+              <input type="number" id="sub2apiMinCandidates" value="200" min="1" />
+            </div>
+            <div class="config-field" style="flex:1;">
+              <label>缁存姢闂撮殧(鍒嗛挓)</label>
+              <input type="number" id="sub2apiInterval" value="30" min="5" />
+            </div>
+          </div>
+          <div class="toggle-row" style="margin-top:6px;">
+            <label class="ios-toggle-label" for="sub2apiAutoMaintain">
+              <span class="ios-toggle ios-toggle-sm">
+                <input type="checkbox" id="sub2apiAutoMaintain" />
+                <span class="toggle-track"></span>
+              </span>
+              <span>鑷姩缁存姢</span>
+            </label>
+          </div>
+          <div class="config-actions">
+            <button id="sub2apiTestPoolBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
+            <button id="saveSyncConfigBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <span id="syncStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 閭鎻愪緵鍟?-->
+      <div class="config-card collapsible open" style="grid-column: span 2;">
+        <div class="collapsible-trigger">
+          <span>閭鎻愪緵鍟?/span>
+          <span class="collapse-icon">鈻?/span>
+        </div>
+        <div class="collapsible-body">
+          <div class="mail-providers-group">
+            <div class="provider-item" data-provider="mailtm">
+              <label class="provider-toggle">
+                <input type="checkbox" class="mail-provider-check" value="mailtm" checked />
+                <span class="provider-check-mark"></span>
+                Mail.tm (鍏嶈垂)
+              </label>
+              <div class="provider-config">
+                <div class="config-field">
+                  <label>API 鍦板潃</label>
+                  <input type="text" data-key="api_base" placeholder="https://api.mail.tm" autocomplete="off"
+                    spellcheck="false" />
+                </div>
+              </div>
+            </div>
+            <div class="provider-item" data-provider="moemail">
+              <label class="provider-toggle">
+                <input type="checkbox" class="mail-provider-check" value="moemail" />
+                <span class="provider-check-mark"></span>
+                MoeMail (API Key)
+              </label>
+              <div class="provider-config" style="display:none;">
+                <div class="config-field">
+                  <label>API 鍦板潃</label>
+                  <input type="text" data-key="api_base" placeholder="https://your-moemail-api.example.com" autocomplete="off"
+                    spellcheck="false" />
+                </div>
+                <div class="config-field">
+                  <label>API Key</label>
+                  <input type="password" data-key="api_key" placeholder="MoeMail API Key" autocomplete="off" />
+                </div>
+              </div>
+            </div>
+            <div class="provider-item" data-provider="duckmail">
+              <label class="provider-toggle">
+                <input type="checkbox" class="mail-provider-check" value="duckmail" />
+                <span class="provider-check-mark"></span>
+                DuckMail (Bearer Token)
+              </label>
+              <div class="provider-config" style="display:none;">
+                <div class="config-field">
+                  <label>API 鍦板潃</label>
+                  <input type="text" data-key="api_base" placeholder="https://api.duckmail.sbs" autocomplete="off"
+                    spellcheck="false" />
+                </div>
+                <div class="config-field">
+                  <label>Bearer Token</label>
+                  <input type="password" data-key="bearer_token" placeholder="DuckMail Bearer Token"
+                    autocomplete="off" />
+                </div>
+              </div>
+            </div>
+            <div class="provider-item" data-provider="cloudflare_temp_email">
+              <label class="provider-toggle">
+                <input type="checkbox" class="mail-provider-check" value="cloudflare_temp_email" />
+                <span class="provider-check-mark"></span>
+                Cloudflare Temp Email
+              </label>
+              <div class="provider-config" style="display:none;">
+                <div class="config-field">
+                  <label>API Base URL</label>
+                  <input type="text" data-key="api_base" placeholder="https://temp-email-api.awsl.uk" autocomplete="off"
+                    spellcheck="false" />
+                </div>
+                <div class="config-field">
+                  <label>Domain (optional; auto detect when empty)</label>
+                  <input type="text" data-key="domain" placeholder="example.com" autocomplete="off"
+                    spellcheck="false" />
+                </div>
+                <div class="config-field">
+                  <label>Site Password (x-custom-auth)</label>
+                  <input type="password" data-key="site_password" placeholder="optional" autocomplete="off" />
+                </div>
+                <div class="config-field">
+                  <label>Admin Password (x-admin-auth)</label>
+                  <input type="password" data-key="admin_password" placeholder="optional" autocomplete="off" />
+                </div>
+                <div class="config-field">
+                  <label>Enable Prefix</label>
+                  <select data-key="enable_prefix">
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="config-field" style="margin-top:10px;max-width:240px;">
+            <label>璺敱绛栫暐</label>
+            <select id="mailStrategySelect">
+              <option value="round_robin">杞</option>
+              <option value="random">闅忔満</option>
+              <option value="failover">瀹归敊浼樺厛</option>
+            </select>
+          </div>
+          <div class="config-actions">
+            <button id="mailTestBtn" class="btn btn-ghost btn-sm">娴嬭瘯杩炴帴</button>
+            <button id="mailSaveBtn" class="btn btn-primary btn-sm">淇濆瓨</button>
+            <span id="mailStatus" class="inline-status"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast 瀹瑰櫒 -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>
+
+

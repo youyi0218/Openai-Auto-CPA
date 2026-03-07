@@ -1,0 +1,16 @@
+.git
+.gitignore
+.claude
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.mypy_cache
+.ruff_cache
+dist
+build
+*.egg-info
+data
+openai_pool_orchestrator_v5.zip

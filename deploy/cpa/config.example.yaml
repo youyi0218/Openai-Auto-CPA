@@ -1,0 +1,12 @@
+# Copy to deploy/cpa/config.yaml and customize.
+# Reference:
+# https://github.com/router-for-me/CLIProxyAPI/blob/main/config.example.yaml
+
+host: "0.0.0.0"
+port: 8317
+
+auth-dir: "/root/.cli-proxy-api"
+
+remote-management:
+  allow-remote: true
+  secret-key: "replace-with-a-strong-random-token"

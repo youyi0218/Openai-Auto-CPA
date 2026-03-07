@@ -1,0 +1,8 @@
+host: "0.0.0.0"
+port: 8317
+
+auth-dir: "/root/.cli-proxy-api"
+
+remote-management:
+  allow-remote: true
+  secret-key: "change-this-secret-before-production"
