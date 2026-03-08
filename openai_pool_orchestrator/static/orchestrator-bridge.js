@@ -9,7 +9,11 @@
     { id: 'duckmail', label: 'DuckMail' },
     { id: 'cloudflare_temp_email', label: 'Cloudflare Temp Email' }
   ];
-  const BRIDGE_ROUTE_HASH = '#/orchestrator';
+  const BRIDGE_ROUTE_HASH = '#/?opa_view=orchestrator';
+  const BRIDGE_ROUTE_LEGACY_HASH = '#/orchestrator';
+  const BRIDGE_ROUTE_PATH = '/';
+  const BRIDGE_ROUTE_QUERY_KEY = 'opa_view';
+  const BRIDGE_ROUTE_QUERY_VALUE = 'orchestrator';
   const BRIDGE_NAV_ID = 'opa-orchestrator-nav-item';
   const BRIDGE_NAV_WRAP_ID = 'opa-orchestrator-nav-wrap';
   const BRIDGE_HOST_ID = 'opa-orchestrator-route-host';
@@ -596,9 +600,30 @@
     }
   }
 
+  function parseHashRoute() {
+    const hash = String(window.location.hash || '');
+    const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+    const qIndex = raw.indexOf('?');
+    const path = (qIndex >= 0 ? raw.slice(0, qIndex) : raw) || '/';
+    const search = qIndex >= 0 ? raw.slice(qIndex + 1) : '';
+    let params = new URLSearchParams();
+    try {
+      params = new URLSearchParams(search);
+    } catch (_) {}
+    return { path, params };
+  }
+
   function isBridgeRoute() {
     const hash = String(window.location.hash || '');
-    return hash === BRIDGE_ROUTE_HASH || hash.startsWith(BRIDGE_ROUTE_HASH + '/') || hash.startsWith(BRIDGE_ROUTE_HASH + '?');
+    if (
+      hash === BRIDGE_ROUTE_LEGACY_HASH ||
+      hash.startsWith(BRIDGE_ROUTE_LEGACY_HASH + '/') ||
+      hash.startsWith(BRIDGE_ROUTE_LEGACY_HASH + '?')
+    ) {
+      return true;
+    }
+    const route = parseHashRoute();
+    return route.path === BRIDGE_ROUTE_PATH && route.params.get(BRIDGE_ROUTE_QUERY_KEY) === BRIDGE_ROUTE_QUERY_VALUE;
   }
 
   function findSidebarNavContainer() {
@@ -620,6 +645,15 @@
       item.id = BRIDGE_NAV_ID;
       item.href = BRIDGE_ROUTE_HASH;
       item.className = sample && sample.className ? sample.className : '';
+      item.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (String(window.location.hash || '') !== BRIDGE_ROUTE_HASH) {
+          window.location.hash = BRIDGE_ROUTE_HASH;
+        } else {
+          scheduleBridgeSync();
+        }
+      });
       item.innerHTML = '<span>注册机</span>';
 
       if (wrapSample) {
