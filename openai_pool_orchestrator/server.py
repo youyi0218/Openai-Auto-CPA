@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI 朔
 峁?REST API + SSE 实时志
 """
@@ -520,7 +520,7 @@ class TaskState:
 
         with self._task_lock:
             if self.status in ("running", "stopping"):
-                raise RuntimeError("谢停止")
+                raise RuntimeError("task is already running or stopping")
             self.status = "running"
             self.stop_event.clear()
             self.current_proxy = proxy
@@ -629,7 +629,7 @@ class TaskState:
                     should_stop = self.target_count > 0 and self.run_success_count >= self.target_count
                 if should_stop:
                     emitter.success(
-                        f"{prefix}汛目 {self.target_count} 远停止",
+                        f"{prefix}target {self.target_count} reached, stopping",
                         step="auto_stop",
                     )
                     self.stop_event.set()
@@ -638,7 +638,7 @@ class TaskState:
                     self.fail_count += 1
                     self.run_fail_count += 1
                     _save_state(self.success_count, self.fail_count)
-                emitter.error(f"{prefix}平台洗未桑尾晒: {email}", step="retry")
+                emitter.error(f"{prefix}platform upload failed after register: {email}", step="retry")
 
         def _auto_sync(file_name: str, email: str, em: "EventEmitter") -> bool:
             cfg = _sync_config
@@ -685,16 +685,21 @@ class TaskState:
                 return True
             try:
                 td = json.loads(token_json)
-                cpa_ok = pool_maintainer.upload_token(file_name, td, proxy=proxy or "")
+                # Reach CPA directly; using register proxy may break local/intranet CPA access.
+                cpa_ok = pool_maintainer.upload_token(file_name, td, proxy="")
                 if cpa_ok:
                     if not _mark_token_uploaded_platform(file_path, "cpa"):
-                        emitter.warn(f"{prefix}CPA 洗晒乇失: {email}", step="cpa_upload")
-                    emitter.success(f"{prefix}CPA 洗晒: {email}", step="cpa_upload")
+                        emitter.warn(f"{prefix}CPA uploaded but local mark failed: {email}", step="cpa_upload")
+                    emitter.success(f"{prefix}CPA upload success: {email}", step="cpa_upload")
                 else:
-                    emitter.error(f"{prefix}CPA 洗失: {email}", step="cpa_upload")
+                    detail = str(getattr(pool_maintainer, "last_upload_error", "") or "").strip()
+                    if detail:
+                        emitter.error(f"{prefix}CPA upload failed: {email} | {detail}", step="cpa_upload")
+                    else:
+                        emitter.error(f"{prefix}CPA upload failed: {email}", step="cpa_upload")
                 return cpa_ok
             except Exception as ex:
-                emitter.error(f"{prefix}CPA 洗斐? {ex}", step="cpa_upload")
+                emitter.error(f"{prefix}CPA upload exception: {ex}", step="cpa_upload")
                 return False
 
         def _upload_to_sub2api(file_name: str, email: str, refresh_token: str, prefix: str) -> bool:
@@ -873,7 +878,7 @@ class TaskState:
                         with open(file_path, "w", encoding="utf-8") as f:
                             f.write(token_json)
 
-                        emitter.success(f"{prefix}Token 驯: {file_name}", step="saved")
+                        emitter.success(f"{prefix}Token saved: {file_name}", step="saved")
                         self.broadcast({
                             "ts": datetime.now().strftime("%H:%M:%S"),
                             "level": "token_saved",
@@ -984,7 +989,7 @@ class TaskState:
                     break
 
                 wait = random.randint(5, 30)
-                emitter.info(f"{prefix}息 {wait} ...", step="wait")
+                emitter.info(f"{prefix}sleep {wait}s ...", step="wait")
                 self.stop_event.wait(wait)
 
         if upload_mode == "decoupled":
@@ -1020,7 +1025,7 @@ class TaskState:
                 with self._task_lock:
                     self._upload_queues = {}
                     self.platform_backlog_count = {name: 0 for name in UPLOAD_PLATFORMS}
-            emitter.info("Worker停止", step="stopped")
+            emitter.info("Workers stopped", step="stopped")
             self._stop_bridge()
             with self._task_lock:
                 self.status = "idle"

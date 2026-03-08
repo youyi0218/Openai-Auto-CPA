@@ -751,14 +751,20 @@
   async function refreshStatus() {
     try {
       const d = await api('/api/status');
-      const text = '状态: ' + (d.status || 'idle') + ' | 成功: ' + num(d.success, 0) + ' | 失败: ' + num(d.fail, 0);
+      const pf = d.platform_fail || {};
+      const text = 'Status: ' + (d.status || 'idle')
+        + ' | Success: ' + num(d.success, 0)
+        + ' | PipelineFail: ' + num(d.fail, 0)
+        + ' | CPAFail: ' + num(pf.cpa, 0)
+        + ' | Sub2ApiFail: ' + num(pf.sub2api, 0);
       const el = qs('opaRunningStatus');
       if (el) el.textContent = text;
     } catch (e) {
       const el = qs('opaRunningStatus');
-      if (el) el.textContent = '状态读取失败: ' + e.message;
+      if (el) el.textContent = 'Status read failed: ' + e.message;
     }
   }
+
 
   function parseHashRoute() {
     const hash = String(window.location.hash || '');

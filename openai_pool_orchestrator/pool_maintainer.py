@@ -77,6 +77,7 @@ class PoolMaintainer:
         self.min_candidates = min_candidates
         self.used_percent_threshold = used_percent_threshold
         self.user_agent = user_agent
+        self.last_upload_error: str = ""
 
     def fetch_auth_files(self, timeout: int = 15) -> List[Dict[str, Any]]:
         resp = _requests.get(
@@ -308,22 +309,28 @@ class PoolMaintainer:
         return max(0, gap)
 
     def upload_token(self, filename: str, token_data: Dict[str, Any], proxy: str = "") -> bool:
+        self.last_upload_error = ""
         if not self.base_url or not self.token:
+            self.last_upload_error = "missing cpa_base_url or cpa_token"
             return False
         session = _build_session(proxy)
         content = json.dumps(token_data, ensure_ascii=False).encode("utf-8")
-        files = {"file": (filename, content, "application/json")}
         headers = {"Authorization": f"Bearer {self.token}"}
         for attempt in range(3):
             try:
+                files = {"file": (filename, content, "application/json")}
                 resp = session.post(
                     f"{self.base_url}/v0/management/auth-files",
                     files=files, headers=headers, verify=False, timeout=30,
                 )
                 if resp.status_code in (200, 201, 204):
                     return True
-            except Exception:
-                pass
+                body = str(resp.text or "").strip()
+                if len(body) > 200:
+                    body = body[:200] + "..."
+                self.last_upload_error = f"status={resp.status_code}, body={body}"
+            except Exception as e:
+                self.last_upload_error = str(e)
             if attempt < 2:
                 time.sleep(2 ** attempt)
         return False
