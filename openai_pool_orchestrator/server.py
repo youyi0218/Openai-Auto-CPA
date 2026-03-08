@@ -372,15 +372,30 @@ def _save_state(success: int, fail: int) -> None:
 
 app = FastAPI(title="OpenAI Pool Orchestrator", version=__version__)
 
+BRIDGE_PUBLIC_API_PATHS = {
+    "/api/auth/status",
+    "/api/status",
+    "/api/start",
+    "/api/stop",
+    "/api/check-proxy",
+    "/api/proxy",
+    "/api/proxy/save",
+    "/api/local/maintain",
+    "/api/pool/config",
+    "/api/pool/check",
+    "/api/mail/config",
+    "/api/mail/test",
+}
+
 
 @app.middleware("http")
 async def api_key_auth_middleware(request: Request, call_next):
     path = request.url.path
     if not path.startswith("/api/"):
         return await call_next(request)
-    if request.method == "OPTIONS":
+    if path in BRIDGE_PUBLIC_API_PATHS:
         return await call_next(request)
-    if path == "/api/auth/status":
+    if request.method == "OPTIONS":
         return await call_next(request)
     if not _is_api_auth_enabled():
         return await call_next(request)
