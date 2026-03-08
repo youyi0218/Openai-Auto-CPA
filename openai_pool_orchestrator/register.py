@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 import sys
@@ -1273,6 +1273,13 @@ def run(
                 )
             except TypeError:
                 email, dev_token = mail_provider.create_mailbox(proxy=static_proxy)
+            except Exception as e:
+                provider_detail = str(getattr(mail_provider, "last_error", "") or "").strip()
+                if provider_detail:
+                    emitter.error(f"temporary mailbox create exception: {e} | detail: {provider_detail}", step="create_email")
+                else:
+                    emitter.error(f"temporary mailbox create exception: {e}", step="create_email")
+                return None
         else:
             emitter.info("正在创建 Mail.tm 临时邮箱...", step="create_email")
             email, dev_token = get_email_and_token(
@@ -1281,7 +1288,13 @@ def run(
                 proxy_selector=mail_proxies_selector,
             )
         if not email or not dev_token:
-            emitter.error("临时邮箱创建失败", step="create_email")
+            provider_detail = ""
+            if mail_provider is not None:
+                provider_detail = str(getattr(mail_provider, "last_error", "") or "").strip()
+            if provider_detail:
+                emitter.error(f"temporary mailbox create failed: {provider_detail}", step="create_email")
+            else:
+                emitter.error("temporary mailbox create failed", step="create_email")
             return None
         emitter.success(f"临时邮箱创建成功: {email}", step="create_email")
 

@@ -152,14 +152,17 @@ class MailProvider(ABC):
         """轮询获取6位验证码，超时返回空字符串"""
 
     def test_connection(self, proxy: str = "") -> Tuple[bool, str]:
-        """测试 API 连通性，返回 (success, message)"""
+        """Test provider connectivity and return (success, message)."""
         try:
             email, cred = self.create_mailbox(proxy)
             if email and cred:
-                return True, f"成功创建测试邮箱: {email}"
-            return False, "创建邮箱失败，请检查配置"
+                return True, f"successfully created test mailbox: {email}"
+            detail = str(getattr(self, "last_error", "") or "").strip()
+            if detail:
+                return False, f"mailbox create failed: {detail}"
+            return False, "mailbox create failed"
         except Exception as e:
-            return False, f"连接失败: {e}"
+            return False, f"mail provider exception: {e}"
 
     def close(self):
         pass
@@ -536,6 +539,24 @@ class CloudflareTempEmailProvider(MailProvider):
         self.site_password = site_password.strip()
         self.admin_password = admin_password.strip()
         self.enable_prefix = enable_prefix
+        self.last_error = ""
+
+    @staticmethod
+    def _short_body(resp: Any, limit: int = 240) -> str:
+        try:
+            body = str(getattr(resp, "text", "") or "").strip()
+        except Exception:
+            body = ""
+        if not body:
+            return ""
+        if len(body) > limit:
+            return body[:limit] + "..."
+        return body
+
+    def _set_last_error(self, message: str) -> None:
+        msg = str(message or "").strip()
+        if msg:
+            self.last_error = msg
 
     def _headers(
         self,
@@ -725,11 +746,15 @@ class CloudflareTempEmailProvider(MailProvider):
                     verify=False,
                 )
                 if resp.status_code != 200:
+                    self._set_last_error(
+                        f"discover domain {endpoint} failed: status={resp.status_code}, body={self._short_body(resp)}"
+                    )
                     continue
                 domains = self._extract_domains(resp.json())
                 if domains:
                     return random.choice(domains)
-            except Exception:
+            except Exception as e:
+                self._set_last_error(f"discover domain {endpoint} exception: {e}")
                 continue
         return ""
 
@@ -741,6 +766,7 @@ class CloudflareTempEmailProvider(MailProvider):
         use_admin_auth: bool,
         domain: str,
     ) -> Tuple[str, str]:
+        last_reason = ""
         for _ in range(5):
             name = "oc" + secrets.token_hex(5)
             payload: Dict[str, Any] = {"name": name, "enablePrefix": self.enable_prefix}
@@ -756,14 +782,21 @@ class CloudflareTempEmailProvider(MailProvider):
                     verify=False,
                 )
                 if resp.status_code not in (200, 201):
+                    last_reason = (
+                        f"create address {endpoint} failed: status={resp.status_code}, body={self._short_body(resp)}"
+                    )
                     if resp.status_code in (401, 403):
                         break
                     continue
                 email, token = self._extract_mailbox_credential(resp.json())
                 if email and token:
                     return email, token
-            except Exception:
+                last_reason = f"create address {endpoint} returned invalid payload"
+            except Exception as e:
+                last_reason = f"create address {endpoint} exception: {e}"
                 continue
+        if last_reason:
+            self._set_last_error(last_reason)
         return "", ""
 
     def create_mailbox(
@@ -771,6 +804,7 @@ class CloudflareTempEmailProvider(MailProvider):
         proxy: str = "",
         proxy_selector: Optional[Callable[[], str]] = None,
     ) -> Tuple[str, str]:
+        self.last_error = ""
         session = _build_session(proxy, proxy_selector)
         domain = self._discover_domain(session)
 
@@ -788,6 +822,10 @@ class CloudflareTempEmailProvider(MailProvider):
             )
             if email and token:
                 return email, token
+        if not self.last_error:
+            self._set_last_error(
+                f"create mailbox failed: api_base={self.api_base}, domain={domain or '(auto)'}"
+            )
         return "", ""
 
     def wait_for_otp(
