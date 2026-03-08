@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   if (window.__OPA_BRIDGE_INIT__) return;
   window.__OPA_BRIDGE_INIT__ = true;
 
@@ -13,20 +13,129 @@
   const BRIDGE_NAV_ID = 'opa-orchestrator-nav-item';
   const BRIDGE_NAV_WRAP_ID = 'opa-orchestrator-nav-wrap';
   const BRIDGE_HOST_ID = 'opa-orchestrator-route-host';
+  const BRIDGE_API_KEY_STORAGE = 'opa_bridge_api_key';
+  const BRIDGE_API_KEY_QUERY = 'api_key';
 
   let bridgeRoot = null;
   let bridgeSyncTimer = null;
   let bridgeObserver = null;
   let bridgePrevActive = false;
+  let bridgeRuntimeApiKey = '';
+  let bridgeApiPrompted = false;
 
   const qs = (id) => document.getElementById(id);
   const qsa = (selector) => Array.from(document.querySelectorAll(selector));
 
-  function api(path, init) {
-    return fetch(path, init).then(async (res) => {
+  function normalizeApiKey(value) {
+    const raw = String(value == null ? '' : value).trim();
+    return raw.replace(/^"+|"+$/g, '').trim();
+  }
+
+  function readApiKeyFromUrl() {
+    try {
+      const sp = new URLSearchParams(window.location.search || '');
+      const fromSearch = normalizeApiKey(sp.get(BRIDGE_API_KEY_QUERY) || '');
+      if (fromSearch) return fromSearch;
+
+      const hash = String(window.location.hash || '');
+      const idx = hash.indexOf('?');
+      if (idx >= 0) {
+        const hashSearch = new URLSearchParams(hash.slice(idx + 1));
+        const fromHash = normalizeApiKey(hashSearch.get(BRIDGE_API_KEY_QUERY) || '');
+        if (fromHash) return fromHash;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function readApiKeyFromStorage() {
+    const candidates = [BRIDGE_API_KEY_STORAGE, 'x_api_key', 'api_key'];
+    for (const key of candidates) {
+      try {
+        const value = localStorage.getItem(key);
+        if (!value) continue;
+        const normalized = normalizeApiKey(value);
+        if (normalized && !normalized.startsWith('enc::v1::')) return normalized;
+      } catch (_) {}
+    }
+    return '';
+  }
+
+  function getApiKey() {
+    if (bridgeRuntimeApiKey) return bridgeRuntimeApiKey;
+    const fromUrl = readApiKeyFromUrl();
+    if (fromUrl) {
+      bridgeRuntimeApiKey = fromUrl;
+      try { localStorage.setItem(BRIDGE_API_KEY_STORAGE, fromUrl); } catch (_) {}
+      return bridgeRuntimeApiKey;
+    }
+    const fromStorage = readApiKeyFromStorage();
+    if (fromStorage) {
+      bridgeRuntimeApiKey = fromStorage;
+      return bridgeRuntimeApiKey;
+    }
+    return '';
+  }
+
+  function setApiKey(value) {
+    const key = normalizeApiKey(value);
+    bridgeRuntimeApiKey = key;
+    try {
+      if (key) localStorage.setItem(BRIDGE_API_KEY_STORAGE, key);
+      else localStorage.removeItem(BRIDGE_API_KEY_STORAGE);
+    } catch (_) {}
+  }
+
+  function buildAuthedRequest(path, init, apiKey) {
+    const headers = new Headers((init && init.headers) || {});
+    let requestPath = path;
+    if (apiKey) {
+      headers.set('x-api-key', apiKey);
+      if (!headers.has('authorization')) {
+        headers.set('authorization', 'Bearer ' + apiKey);
+      }
+      try {
+        const url = new URL(path, window.location.origin);
+        url.searchParams.set(BRIDGE_API_KEY_QUERY, apiKey);
+        requestPath = url.pathname + url.search;
+      } catch (_) {
+        requestPath = path + (String(path).includes('?') ? '&' : '?') + BRIDGE_API_KEY_QUERY + '=' + encodeURIComponent(apiKey);
+      }
+    }
+    return {
+      path: requestPath,
+      init: Object.assign({}, init || {}, { headers }),
+    };
+  }
+
+  function promptApiKeyIfNeeded() {
+    if (bridgeApiPrompted) return '';
+    bridgeApiPrompted = true;
+    const input = window.prompt('检测到已开启 API 鉴权，请输入 API Key（x-api-key）');
+    return normalizeApiKey(input || '');
+  }
+
+  function api(path, init, allowRetryPrompt) {
+    const canRetry = allowRetryPrompt !== false;
+    const apiKey = getApiKey();
+    const req = buildAuthedRequest(path, init, apiKey);
+    return fetch(req.path, req.init).then(async (res) => {
       let data = {};
       try { data = await res.json(); } catch (_) {}
       if (!res.ok) {
+        if (res.status === 401) {
+          if (!apiKey && canRetry) {
+            const prompted = promptApiKeyIfNeeded();
+            if (prompted) {
+              setApiKey(prompted);
+              return api(path, init, false);
+            }
+          }
+          const hint = apiKey
+            ? '401 未授权：当前 API Key 无效，请在系统配置更新后刷新页面。'
+            : '401 未授权：请在 URL 加 ?api_key=你的key，或先在系统配置里关闭鉴权。';
+          throw new Error(hint);
+        }
         const msg = data.detail || data.message || ('HTTP ' + res.status);
         throw new Error(msg);
       }
@@ -825,11 +934,9 @@
   function init() {
     build();
     bind();
-    loadProxyConfig();
-    loadPoolConfig();
-    loadMailConfig();
-    refreshStatus();
-    setInterval(refreshStatus, 3000);
+    setInterval(() => {
+      if (isBridgeRoute()) refreshStatus();
+    }, 3000);
     applyBridgeRouteVisibility();
     startBridgeObserver();
     scheduleBridgeSync();
