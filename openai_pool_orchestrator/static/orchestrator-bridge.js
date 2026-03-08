@@ -19,6 +19,8 @@
   const BRIDGE_HOST_ID = 'opa-orchestrator-route-host';
   const BRIDGE_API_KEY_STORAGE = 'opa_bridge_api_key';
   const BRIDGE_API_KEY_QUERY = 'api_key';
+  const RUN_LOG_STREAM_ID = 'opaRunStream';
+  const RUN_LOG_CLEAR_ID = 'opaRunLogClear';
   const SECTION_LOG_IDS = {
     realtime: 'opaLogRealtime',
     register: 'opaLogRegister',
@@ -33,6 +35,8 @@
   let bridgePrevActive = false;
   let bridgeRuntimeApiKey = '';
   let bridgeApiPrompted = false;
+  let runLogStream = null;
+  let runLogErrorLogged = false;
 
   const qs = (id) => document.getElementById(id);
   const qsa = (selector) => Array.from(document.querySelectorAll(selector));
@@ -178,6 +182,74 @@
       }
     }
     status(String(text || ''));
+  }
+
+  function appendRunLogLine(payload) {
+    const box = qs(RUN_LOG_STREAM_ID);
+    if (!box) return;
+
+    const levelRaw = String(payload?.level || 'info').trim().toLowerCase();
+    const level = ['info', 'success', 'error', 'warn', 'warning', 'connected'].includes(levelRaw) ? levelRaw : 'info';
+    const step = String(payload?.step || '').trim();
+    const msg = String(payload?.message || '').trim();
+    if (!msg) return;
+    const ts = String(payload?.ts || new Date().toLocaleTimeString()).trim();
+
+    const row = document.createElement('div');
+    row.className = 'opa-bridge-runlog-line level-' + (level === 'warning' ? 'warn' : level);
+    row.textContent = '[' + ts + '] ' + (step ? '[' + step + '] ' : '') + msg;
+    box.appendChild(row);
+
+    while (box.childElementCount > 600) {
+      box.removeChild(box.firstElementChild);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function openRunLogStream() {
+    if (runLogStream) return;
+
+    let streamUrl = '/api/logs';
+    const apiKey = getApiKey();
+    if (apiKey) {
+      streamUrl += '?api_key=' + encodeURIComponent(apiKey);
+    }
+
+    try {
+      runLogStream = new EventSource(streamUrl);
+    } catch (e) {
+      appendRunLogLine({ level: 'error', step: 'logs', message: 'Failed to open log stream: ' + (e?.message || e) });
+      return;
+    }
+
+    runLogStream.onopen = function () {
+      runLogErrorLogged = false;
+      appendRunLogLine({ level: 'connected', step: 'logs', message: 'Live log stream connected' });
+    };
+
+    runLogStream.onmessage = function (evt) {
+      if (!evt || !evt.data) return;
+      try {
+        const payload = JSON.parse(evt.data);
+        appendRunLogLine(payload);
+      } catch (_) {
+        appendRunLogLine({ level: 'warn', step: 'logs', message: String(evt.data || '') });
+      }
+    };
+
+    runLogStream.onerror = function () {
+      if (runLogErrorLogged) return;
+      runLogErrorLogged = true;
+      appendRunLogLine({ level: 'warn', step: 'logs', message: 'Log stream disconnected, retrying...' });
+    };
+  }
+
+  function closeRunLogStream() {
+    if (!runLogStream) return;
+    try {
+      runLogStream.close();
+    } catch (_) {}
+    runLogStream = null;
   }
 
   function getSecretState(el) {
@@ -483,6 +555,19 @@
       logBox.className = 'opa-bridge-log';
       card.appendChild(logBox);
     });
+
+    const realtimeCard = qs('opaRunningStatus')?.closest('.opa-bridge-card');
+    if (realtimeCard && !qs(RUN_LOG_STREAM_ID)) {
+      const wrap = document.createElement('div');
+      wrap.className = 'opa-runlog-wrap';
+      wrap.innerHTML =
+        '<div class="opa-runlog-head">' +
+          '<span>Run Logs</span>' +
+          '<button id="' + RUN_LOG_CLEAR_ID + '" class="opa-bridge-btn" type="button">Clear</button>' +
+        '</div>' +
+        '<div id="' + RUN_LOG_STREAM_ID + '" class="opa-bridge-runlog"></div>';
+      realtimeCard.appendChild(wrap);
+    }
   }
 
   function getSelectedMailProviders() {
@@ -804,6 +889,7 @@
       loadPoolConfig();
       loadMailConfig();
       refreshStatus();
+      openRunLogStream();
     }
     bridgePrevActive = active;
   }
@@ -853,6 +939,12 @@
       const el = qs(id);
       if (el) el.addEventListener('click', fn);
     };
+
+    onClick(RUN_LOG_CLEAR_ID, () => {
+      const box = qs(RUN_LOG_STREAM_ID);
+      if (box) box.innerHTML = '';
+      appendRunLogLine({ level: 'info', step: 'logs', message: 'Run logs cleared' });
+    });
 
     onClick('opaSaveRealtime', async () => {
       logSection('realtime', 'Saving realtime config...');
@@ -1105,6 +1197,7 @@
   function init() {
     build();
     bind();
+    openRunLogStream();
     setInterval(() => {
       if (isBridgeRoute()) refreshStatus();
     }, 3000);
@@ -1113,6 +1206,7 @@
     scheduleBridgeSync();
     window.setTimeout(scheduleBridgeSync, 300);
     window.setTimeout(scheduleBridgeSync, 1200);
+    window.addEventListener('beforeunload', closeRunLogStream);
   }
 
   if (document.readyState === 'loading') {

@@ -195,6 +195,59 @@
   color: #b91c1c;
 }
 
+.opa-runlog-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 10px;
+  background: var(--bg-primary, #fff);
+}
+
+.opa-runlog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  font-size: 12px;
+  color: var(--text-primary, #111827);
+}
+
+.opa-bridge-runlog {
+  max-height: 340px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: #0b1020;
+}
+
+.opa-bridge-runlog-line {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.opa-bridge-runlog-line + .opa-bridge-runlog-line {
+  margin-top: 4px;
+}
+
+.opa-bridge-runlog-line.level-success {
+  color: #34d399;
+}
+
+.opa-bridge-runlog-line.level-error {
+  color: #f87171;
+}
+
+.opa-bridge-runlog-line.level-warn {
+  color: #fbbf24;
+}
+
+.opa-bridge-runlog-line.level-connected {
+  color: #93c5fd;
+}
+
 .opa-secret-wrap {
   position: relative;
 }
