@@ -170,6 +170,31 @@
   word-break: break-word;
 }
 
+.opa-bridge-log {
+  margin-top: 4px;
+  max-height: 160px;
+  overflow: auto;
+  border: 1px dashed var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--bg-primary, #fff);
+}
+
+.opa-bridge-log-line {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary, #374151);
+  word-break: break-word;
+}
+
+.opa-bridge-log-line + .opa-bridge-log-line {
+  margin-top: 4px;
+}
+
+.opa-bridge-log-line.error {
+  color: #b91c1c;
+}
+
 .opa-secret-wrap {
   position: relative;
 }

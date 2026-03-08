@@ -2487,6 +2487,10 @@ class MailConfigRequest(BaseModel):
     mail_strategy: str = "round_robin"
 
 
+class MailTestRequest(BaseModel):
+    providers: List[str] = []
+
+
 @app.get("/api/pool/config")
 async def api_get_pool_config() -> Dict[str, Any]:
     cfg = _sync_config
@@ -2707,13 +2711,25 @@ async def api_set_mail_config(req: MailConfigRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/mail/test")
-async def api_mail_test() -> Dict[str, Any]:
+async def api_mail_test(req: Optional[MailTestRequest] = None) -> Dict[str, Any]:
     try:
         router = MultiMailRouter(_sync_config)
+        requested: List[str] = []
+        if req is not None:
+            for name in req.providers or []:
+                normalized = str(name or "").strip().lower()
+                if normalized in MAIL_PROVIDER_CHOICES and normalized not in requested:
+                    requested.append(normalized)
+            if req.providers and not requested:
+                return {"ok": False, "results": [], "message": "请求的邮箱提供商无效"}
         results = []
         for pname, provider in router.providers():
+            if requested and pname not in requested:
+                continue
             ok, msg = await run_in_threadpool(provider.test_connection, _state.current_proxy or "")
             results.append({"provider": pname, "ok": ok, "message": msg})
+        if requested and not results:
+            return {"ok": False, "results": [], "message": "未找到可测试的邮箱提供商"}
         all_ok = all(r["ok"] for r in results)
         return {"ok": all_ok, "results": results, "message": "全通" if all_ok else "失"}
     except Exception as e:
