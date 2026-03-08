@@ -2489,6 +2489,7 @@ class MailConfigRequest(BaseModel):
 
 class MailTestRequest(BaseModel):
     providers: List[str] = []
+    use_runtime_proxy: bool = False
 
 
 @app.get("/api/pool/config")
@@ -2715,6 +2716,7 @@ async def api_mail_test(req: Optional[MailTestRequest] = None) -> Dict[str, Any]
     try:
         router = MultiMailRouter(_sync_config)
         requested: List[str] = []
+        use_runtime_proxy = False
         if req is not None:
             for name in req.providers or []:
                 normalized = str(name or "").strip().lower()
@@ -2722,11 +2724,13 @@ async def api_mail_test(req: Optional[MailTestRequest] = None) -> Dict[str, Any]
                     requested.append(normalized)
             if req.providers and not requested:
                 return {"ok": False, "results": [], "message": "请求的邮箱提供商无效"}
+            use_runtime_proxy = bool(req.use_runtime_proxy)
+        test_proxy = (_state.current_proxy or "").strip() if use_runtime_proxy else ""
         results = []
         for pname, provider in router.providers():
             if requested and pname not in requested:
                 continue
-            ok, msg = await run_in_threadpool(provider.test_connection, _state.current_proxy or "")
+            ok, msg = await run_in_threadpool(provider.test_connection, test_proxy)
             results.append({"provider": pname, "ok": ok, "message": msg})
         if requested and not results:
             return {"ok": False, "results": [], "message": "未找到可测试的邮箱提供商"}

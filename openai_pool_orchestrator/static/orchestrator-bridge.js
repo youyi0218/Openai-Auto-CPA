@@ -1058,7 +1058,8 @@
         const details = results.map((r) => {
           const name = String(r.provider || 'unknown');
           const ok = r.ok ? 'OK' : 'FAIL';
-          return name + ':' + ok;
+          const msg = String(r.message || '').trim();
+          return name + ':' + ok + (msg ? (' (' + msg + ')') : '');
         }).join(' | ');
         logSection('mail', details + (d.message ? (' | ' + d.message) : ''), d.ok ? 'info' : 'error');
       } catch (e) {
@@ -1083,7 +1084,8 @@
         const details = results.map((r) => {
           const name = String(r.provider || 'unknown');
           const ok = r.ok ? 'OK' : 'FAIL';
-          return name + ':' + ok;
+          const msg = String(r.message || '').trim();
+          return name + ':' + ok + (msg ? (' (' + msg + ')') : '');
         }).join(' | ');
         logSection('mail', details || (d.message || 'No result'), d.ok ? 'info' : 'error');
       } catch (e) {
