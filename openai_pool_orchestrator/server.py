@@ -1214,9 +1214,25 @@ async def api_set_auth_config(req: ApiAuthConfigRequest) -> Dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
+    return _render_management_html()
+
+
+@app.get("/management.html", response_class=HTMLResponse)
+async def management_html() -> HTMLResponse:
+    return _render_management_html()
+
+
+def _render_management_html() -> HTMLResponse:
     html_path = STATIC_DIR / "index.html"
     if html_path.exists():
-        return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+        html = html_path.read_text(encoding="utf-8")
+        if "orchestrator-bridge.css" not in html:
+            bridge_css = '  <link rel="stylesheet" href="/static/orchestrator-bridge.css" />'
+            html = html.replace("</head>", f"{bridge_css}\n  </head>", 1) if "</head>" in html else f"{html}\n{bridge_css}\n"
+        if "orchestrator-bridge.js" not in html:
+            bridge_js = '    <script src="/static/orchestrator-bridge.js"></script>'
+            html = html.replace("</body>", f"{bridge_js}\n  </body>", 1) if "</body>" in html else f"{html}\n{bridge_js}\n"
+        return HTMLResponse(content=html)
     return HTMLResponse("<h1>前募未业</h1>", status_code=404)
 
 
