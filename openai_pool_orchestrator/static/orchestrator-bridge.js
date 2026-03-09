@@ -9,8 +9,8 @@
     { id: 'duckmail', label: 'DuckMail' },
     { id: 'cloudflare_temp_email', label: 'Cloudflare Temp Email' }
   ];
-  const BRIDGE_ROUTE_HASH = '#/orchestrator';
-  const BRIDGE_ROUTE_COMPAT_HASH = '#/?opa_view=orchestrator';
+  const BRIDGE_ROUTE_HASH = '#/?opa_view=orchestrator';
+  const BRIDGE_ROUTE_COMPAT_HASH = '#/orchestrator';
   const BRIDGE_ROUTE_PATH = '/';
   const BRIDGE_ROUTE_QUERY_KEY = 'opa_view';
   const BRIDGE_ROUTE_QUERY_VALUE = 'orchestrator';
