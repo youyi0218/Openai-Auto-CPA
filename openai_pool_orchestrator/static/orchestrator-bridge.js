@@ -39,6 +39,7 @@
   let runLogStream = null;
   let runLogErrorLogged = false;
   let runLogReconnectTimer = null;
+  const bridgeSecretCache = new Map();
 
   const qs = (id) => document.getElementById(id);
   const qsa = (selector) => Array.from(document.querySelectorAll(selector));
@@ -150,7 +151,7 @@
           }
           const hint = apiKey
             ? '401 未授权：当前 API Key 无效，请在系统配置更新后刷新页面。'
-            : '401 未授权：请在 URL 加 ?api_key=你的key，或先在系统配置里关闭鉴权。';
+            : '401 未授权：请在 URL 添加 ?api_key=你的key，或先在系统配置里关闭鉴权。';
           throw new Error(hint);
         }
         const msg = data.detail || data.message || ('HTTP ' + res.status);
@@ -220,13 +221,13 @@
     try {
       runLogStream = new EventSource(streamUrl);
     } catch (e) {
-      appendRunLogLine({ level: 'error', step: 'logs', message: 'Failed to open log stream: ' + (e?.message || e) });
+      appendRunLogLine({ level: 'error', step: 'logs', message: '打开日志流失败：' + (e?.message || e) });
       return;
     }
 
     runLogStream.onopen = function () {
       runLogErrorLogged = false;
-      appendRunLogLine({ level: 'connected', step: 'logs', message: 'Live log stream connected' });
+      appendRunLogLine({ level: 'connected', step: 'logs', message: '实时日志流已连接' });
     };
 
     runLogStream.onmessage = function (evt) {
@@ -242,7 +243,7 @@
     runLogStream.onerror = function () {
       if (runLogErrorLogged) return;
       runLogErrorLogged = true;
-      appendRunLogLine({ level: 'warn', step: 'logs', message: 'Log stream disconnected, retrying...' });
+      appendRunLogLine({ level: 'warn', step: 'logs', message: '日志流已断开，正在重连...' });
       if (runLogStream && runLogStream.readyState === 2) {
         closeRunLogStream();
         if (!runLogReconnectTimer) {
@@ -281,6 +282,9 @@
     el.value = hasStored ? SECRET_MASK : '';
     el.dataset.masked = hasStored ? '1' : '0';
     el.dataset.dirty = '0';
+    if (!hasStored) {
+      bridgeSecretCache.delete(el.id);
+    }
     el.type = 'password';
     const eye = document.querySelector('[data-eye-for="' + el.id + '"]');
     if (eye) eye.textContent = '显示';
@@ -292,6 +296,9 @@
       el.dataset.dirty = '1';
       if (el.value !== SECRET_MASK) {
         el.dataset.masked = '0';
+        const val = String(el.value || '').trim();
+        if (val) bridgeSecretCache.set(el.id, val);
+        else bridgeSecretCache.delete(el.id);
       }
     };
     el.addEventListener('input', onDirty);
@@ -307,13 +314,20 @@
     if (!ipt || !btn) return;
     btn.addEventListener('click', function () {
       if (ipt.dataset.masked === '1' && String(ipt.value || '') === SECRET_MASK) {
-        const sec = inputId === 'opaCpaToken' ? 'cpa' : 'mail';
-        logSection(sec, 'Masked value cannot be shown. Re-enter the real value first.', 'error');
-        return;
+        const cached = String(bridgeSecretCache.get(inputId) || '').trim();
+        if (cached) {
+          ipt.value = cached;
+          ipt.dataset.masked = '0';
+          ipt.dataset.dirty = '0';
+        } else {
+          const sec = inputId === 'opaCpaToken' ? 'cpa' : 'mail';
+          logSection(sec, '掩码值无法直接显示，请重新输入真实值。', 'error');
+          return;
+        }
       }
       const show = ipt.type === 'password';
       ipt.type = show ? 'text' : 'password';
-      btn.textContent = show ? 'Hide' : 'Show';
+      btn.textContent = show ? '隐藏' : '显示';
     });
   }
 
@@ -577,8 +591,8 @@
       wrap.className = 'opa-runlog-wrap';
       wrap.innerHTML =
         '<div class="opa-runlog-head">' +
-          '<span>Run Logs</span>' +
-          '<button id="' + RUN_LOG_CLEAR_ID + '" class="opa-bridge-btn" type="button">Clear</button>' +
+          '<span>运行日志</span>' +
+          '<button id="' + RUN_LOG_CLEAR_ID + '" class="opa-bridge-btn" type="button">清空</button>' +
         '</div>' +
         '<div id="' + RUN_LOG_STREAM_ID + '" class="opa-bridge-runlog"></div>';
       realtimeCard.appendChild(wrap);
@@ -643,6 +657,7 @@
       el.value = plain;
       el.dataset.masked = '0';
       el.dataset.dirty = '0';
+      bridgeSecretCache.set(id, plain);
     } else {
       setSecretMasked(el, false);
     }
@@ -767,16 +782,16 @@
     try {
       const d = await api('/api/status');
       const pf = d.platform_fail || {};
-      const text = 'Status: ' + (d.status || 'idle')
-        + ' | Success: ' + num(d.success, 0)
-        + ' | PipelineFail: ' + num(d.fail, 0)
-        + ' | CPAFail: ' + num(pf.cpa, 0)
-        + ' | Sub2ApiFail: ' + num(pf.sub2api, 0);
+      const text = '状态: ' + (d.status || 'idle')
+        + ' | 成功: ' + num(d.success, 0)
+        + ' | 管道失败: ' + num(d.fail, 0)
+        + ' | CPA失败: ' + num(pf.cpa, 0)
+        + ' | Sub2Api失败: ' + num(pf.sub2api, 0);
       const el = qs('opaRunningStatus');
       if (el) el.textContent = text;
     } catch (e) {
       const el = qs('opaRunningStatus');
-      if (el) el.textContent = 'Status read failed: ' + e.message;
+      if (el) el.textContent = '状态读取失败: ' + e.message;
     }
   }
 
@@ -1037,11 +1052,11 @@
     onClick(RUN_LOG_CLEAR_ID, () => {
       const box = qs(RUN_LOG_STREAM_ID);
       if (box) box.innerHTML = '';
-      appendRunLogLine({ level: 'info', step: 'logs', message: 'Run logs cleared' });
+      appendRunLogLine({ level: 'info', step: 'logs', message: '运行日志已清空' });
     });
 
     onClick('opaSaveRealtime', async () => {
-      logSection('realtime', 'Saving realtime config...');
+      logSection('realtime', '正在保存实时配置...');
       try {
         await api('/api/proxy/save', {
           method: 'POST',
@@ -1052,19 +1067,19 @@
             thread_count: Math.max(1, Math.min(10, num(qs('opaThreads').value, 3)))
           })
         });
-        logSection('realtime', 'Realtime config saved');
+        logSection('realtime', '实时配置已保存');
       } catch (e) {
-        logSection('realtime', 'Save failed: ' + e.message, 'error');
+        logSection('realtime', '保存失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaCheckProxy', async () => {
       const proxy = (qs('opaProxy').value || '').trim();
       if (!proxy) {
-        logSection('realtime', 'Please input proxy first', 'error');
+        logSection('realtime', '请先输入代理地址', 'error');
         return;
       }
-      logSection('realtime', 'Checking proxy...');
+      logSection('realtime', '正在检测代理...');
       try {
         const d = await api('/api/check-proxy', {
           method: 'POST',
@@ -1072,17 +1087,17 @@
           body: JSON.stringify({ proxy: proxy })
         });
         if (d.ok) {
-          logSection('realtime', 'Proxy OK, location: ' + (d.loc || '--'));
+          logSection('realtime', '代理可用，地区: ' + (d.loc || '--'));
         } else {
-          logSection('realtime', 'Proxy failed: ' + (d.error || '--'), 'error');
+          logSection('realtime', '代理检测失败: ' + (d.error || '--'), 'error');
         }
       } catch (e) {
-        logSection('realtime', 'Proxy check failed: ' + e.message, 'error');
+        logSection('realtime', '代理检测异常: ' + e.message, 'error');
       }
     });
 
     onClick('opaStart', async () => {
-      logSection('realtime', 'Starting register task...');
+      logSection('realtime', '正在启动注册任务...');
       try {
         await api('/api/start', {
           method: 'POST',
@@ -1093,26 +1108,26 @@
             thread_count: Math.max(1, Math.min(10, num(qs('opaThreads').value, 3)))
           })
         });
-        logSection('realtime', 'Register task started');
+        logSection('realtime', '注册任务已启动');
         refreshStatus();
       } catch (e) {
-        logSection('realtime', 'Start failed: ' + e.message, 'error');
+        logSection('realtime', '启动失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaStop', async () => {
-      logSection('realtime', 'Stopping register task...');
+      logSection('realtime', '正在停止注册任务...');
       try {
         await api('/api/stop', { method: 'POST' });
-        logSection('realtime', 'Stop request sent');
+        logSection('realtime', '已发送停止请求');
         refreshStatus();
       } catch (e) {
-        logSection('realtime', 'Stop failed: ' + e.message, 'error');
+        logSection('realtime', '停止失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaSaveRegister', async () => {
-      logSection('register', 'Saving auto-register config...');
+      logSection('register', '正在保存自动注册配置...');
       try {
         await api('/api/proxy/save', {
           method: 'POST',
@@ -1125,14 +1140,14 @@
             thread_count: Math.max(1, Math.min(10, num(qs('opaThreads').value, 3)))
           })
         });
-        logSection('register', 'Auto-register config saved');
+        logSection('register', '自动注册配置已保存');
       } catch (e) {
-        logSection('register', 'Save failed: ' + e.message, 'error');
+        logSection('register', '保存失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaSaveMaintain', async () => {
-      logSection('maintain', 'Saving maintain config...');
+      logSection('maintain', '正在保存保活配置...');
       try {
         await api('/api/proxy/save', {
           method: 'POST',
@@ -1143,27 +1158,27 @@
             local_probe_timeout_seconds: Math.max(5, Math.min(60, num(qs('opaProbeTimeout').value, 12)))
           })
         });
-        logSection('maintain', 'Maintain config saved');
+        logSection('maintain', '保活配置已保存');
       } catch (e) {
-        logSection('maintain', 'Save failed: ' + e.message, 'error');
+        logSection('maintain', '保存失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaRunMaintain', async () => {
-      logSection('maintain', 'Running one maintain cycle...');
+      logSection('maintain', '正在执行一次保活...');
       try {
         const d = await api('/api/local/maintain', { method: 'POST' });
         logSection(
           'maintain',
-          'Done: checked ' + num(d.checked, 0) + ', deleted ' + num(d.deleted_ok, 0) + ', remaining ' + num(d.remaining, 0)
+          '完成: 已检查 ' + num(d.checked, 0) + '，已删除 ' + num(d.deleted_ok, 0) + '，剩余 ' + num(d.remaining, 0)
         );
       } catch (e) {
-        logSection('maintain', 'Run failed: ' + e.message, 'error');
+        logSection('maintain', '执行失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaSaveCpa', async () => {
-      logSection('cpa', 'Saving CPA config...');
+      logSection('cpa', '正在保存 CPA 配置...');
       try {
         const tokenState = getSecretState(qs('opaCpaToken'));
         await api('/api/pool/config', {
@@ -1179,26 +1194,26 @@
             maintain_interval_minutes: Math.max(5, num(qs('opaCpaInterval').value, 30))
           })
         });
-        logSection('cpa', 'CPA config saved');
+        logSection('cpa', 'CPA 配置已保存');
       } catch (e) {
-        logSection('cpa', 'Save failed: ' + e.message, 'error');
+        logSection('cpa', '保存失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaTestCpa', async () => {
-      logSection('cpa', 'Testing CPA...');
+      logSection('cpa', '正在测试 CPA...');
       try {
         const d = await api('/api/pool/check', { method: 'POST' });
-        logSection('cpa', d.message || 'CPA test OK');
+        logSection('cpa', d.message || 'CPA 测试通过');
       } catch (e) {
-        logSection('cpa', 'CPA test failed: ' + e.message, 'error');
+        logSection('cpa', 'CPA 测试失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaSaveMail', async () => {
       const selectedProviders = getSelectedMailProviders();
       if (!selectedProviders.length) {
-        logSection('mail', 'Select at least one mail provider', 'error');
+        logSection('mail', '请至少选择一个邮箱提供商', 'error');
         return;
       }
       let primary = String(qs('opaMailPrimary').value || '').trim().toLowerCase();
@@ -1206,7 +1221,7 @@
         primary = selectedProviders[0];
       }
 
-      logSection('mail', 'Saving mail config...');
+      logSection('mail', '正在保存邮箱配置...');
       try {
         const mailProviderConfigs = buildMailConfigs(selectedProviders);
         const primaryLegacyConfig = Object.assign({}, mailProviderConfigs[primary] || {});
@@ -1222,14 +1237,14 @@
             mail_config: primaryLegacyConfig
           })
         });
-        logSection('mail', 'Mail config saved');
+        logSection('mail', '邮箱配置已保存');
       } catch (e) {
-        logSection('mail', 'Mail save failed: ' + e.message, 'error');
+        logSection('mail', '邮箱保存失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaTestMail', async () => {
-      logSection('mail', 'Testing all enabled mail providers...');
+      logSection('mail', '正在测试所有启用的邮箱提供商...');
       try {
         const d = await api('/api/mail/test', {
           method: 'POST',
@@ -1238,28 +1253,28 @@
         });
         const results = Array.isArray(d.results) ? d.results : [];
         if (!results.length) {
-          logSection('mail', (d.ok ? 'Success' : 'Failed') + ': ' + (d.message || 'No result'), d.ok ? 'info' : 'error');
+          logSection('mail', (d.ok ? '成功' : '失败') + ': ' + (d.message || '无结果'), d.ok ? 'info' : 'error');
           return;
         }
         const details = results.map((r) => {
-          const name = String(r.provider || 'unknown');
-          const ok = r.ok ? 'OK' : 'FAIL';
+          const name = String(r.provider || '未知');
+          const ok = r.ok ? '成功' : '失败';
           const msg = String(r.message || '').trim();
           return name + ':' + ok + (msg ? (' (' + msg + ')') : '');
         }).join(' | ');
         logSection('mail', details + (d.message ? (' | ' + d.message) : ''), d.ok ? 'info' : 'error');
       } catch (e) {
-        logSection('mail', 'Mail test failed: ' + e.message, 'error');
+        logSection('mail', '邮箱测试失败: ' + e.message, 'error');
       }
     });
 
     onClick('opaTestMailSelected', async () => {
       const selectedProviders = getSelectedMailProviders();
       if (!selectedProviders.length) {
-        logSection('mail', 'Please select provider(s) to test', 'error');
+        logSection('mail', '请选择要测试的邮箱提供商', 'error');
         return;
       }
-      logSection('mail', 'Testing selected providers: ' + selectedProviders.join(', '));
+      logSection('mail', '正在测试所选提供商: ' + selectedProviders.join(', '));
       try {
         const d = await api('/api/mail/test', {
           method: 'POST',
@@ -1268,14 +1283,14 @@
         });
         const results = Array.isArray(d.results) ? d.results : [];
         const details = results.map((r) => {
-          const name = String(r.provider || 'unknown');
-          const ok = r.ok ? 'OK' : 'FAIL';
+          const name = String(r.provider || '未知');
+          const ok = r.ok ? '成功' : '失败';
           const msg = String(r.message || '').trim();
           return name + ':' + ok + (msg ? (' (' + msg + ')') : '');
         }).join(' | ');
-        logSection('mail', details || (d.message || 'No result'), d.ok ? 'info' : 'error');
+        logSection('mail', details || (d.message || '无结果'), d.ok ? 'info' : 'error');
       } catch (e) {
-        logSection('mail', 'Selected mail test failed: ' + e.message, 'error');
+        logSection('mail', '所选邮箱测试失败: ' + e.message, 'error');
       }
     });
 
@@ -1284,7 +1299,7 @@
       await loadProxyConfig();
       await loadPoolConfig();
       await loadMailConfig();
-      logSection('realtime', 'Data refreshed');
+      logSection('realtime', '数据已刷新');
     });
   }
 
@@ -1309,3 +1324,5 @@
     init();
   }
 })();
+
+

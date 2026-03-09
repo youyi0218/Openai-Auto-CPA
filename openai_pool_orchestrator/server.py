@@ -1920,13 +1920,13 @@ async def api_proxy_pool_test(req: ProxyPoolTestRequest) -> Dict[str, Any]:
 
 @app.get("/api/logs")
 async def api_logs() -> StreamingResponse:
-    """SSE 实时志"""
+    """SSE 实时日志流"""
 
     async def event_generator() -> AsyncGenerator[str, None]:
         q = _state.subscribe()
         try:
-            # 确
-            yield f"data: {json.dumps({'ts': '', 'level': 'connected', 'message': '志映晒', 'step': ''}, ensure_ascii=False)}\n\n"
+            # 首条连接提示
+            yield f"data: {json.dumps({'ts': '', 'level': 'connected', 'message': '日志流已连接', 'step': 'logs'}, ensure_ascii=False)}\n\n"
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=20.0)
@@ -2451,14 +2451,14 @@ async def api_sync_batch(req: BatchSyncRequest) -> Dict[str, Any]:
                 _state.broadcast({
                     "ts": datetime.now().strftime("%H:%M:%S"),
                     "level": "success",
-                    "message": f"[API] {email}: 晒",
+                    "message": f"[API] {email}: 同步成功",
                     "step": "sync",
                 })
             else:
                 _state.broadcast({
                     "ts": datetime.now().strftime("%H:%M:%S"),
                     "level": "error",
-                    "message": f"[API] {email}: 失({result['status']}) {result['body'][:100]}",
+                    "message": f"[API] {email}: 同步失败({result['status']}) {result['body'][:100]}",
                     "step": "sync",
                 })
         except Exception as e:
@@ -2569,9 +2569,9 @@ async def api_pool_maintain() -> Dict[str, Any]:
             "ts": datetime.now().strftime("%H:%M:%S"),
             "level": "info",
             "message": (
-                f"[POOL] 维: 效 {result.get('invalid_count', 0)}, "
-                f"删 {result.get('deleted_ok', 0)}, "
-                f"同删 {result.get('local_deleted_ok', 0)}"
+                f"[POOL] 手动维护: 失效 {result.get('invalid_count', 0)}, "
+                f"删除 {result.get('deleted_ok', 0)}, "
+                f"同步删除 {result.get('local_deleted_ok', 0)}"
             ),
             "step": "pool_maintain",
         })
@@ -2585,17 +2585,17 @@ async def api_pool_maintain() -> Dict[str, Any]:
 @app.post("/api/local/maintain")
 async def api_local_maintain() -> Dict[str, Any]:
     if not _local_maintain_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="local maintenance is already running")
+        raise HTTPException(status_code=409, detail="本地维护任务正在运行")
     try:
         result = await run_in_threadpool(_maintain_local_tokens_sync)
         _state.broadcast({
             "ts": datetime.now().strftime("%H:%M:%S"),
             "level": "info",
             "message": (
-                f"[LOCAL] manual maintain: checked={result.get('checked', 0)}, "
-                f"invalid={result.get('invalid_count', 0)}, "
-                f"deleted={result.get('deleted_ok', 0)}, "
-                f"remaining={result.get('remaining', 0)}"
+                f"[LOCAL] 手动保活: 检查={result.get('checked', 0)}, "
+                f"失效={result.get('invalid_count', 0)}, "
+                f"删除={result.get('deleted_ok', 0)}, "
+                f"剩余={result.get('remaining', 0)}"
             ),
             "step": "local_maintain",
         })
@@ -2741,7 +2741,7 @@ async def api_mail_test(req: Optional[MailTestRequest] = None) -> Dict[str, Any]
         if requested and not results:
             return {"ok": False, "results": [], "message": "未找到可测试的邮箱提供商"}
         all_ok = all(r["ok"] for r in results)
-        return {"ok": all_ok, "results": results, "message": "全通" if all_ok else "失"}
+        return {"ok": all_ok, "results": results, "message": "全部通过" if all_ok else "存在失败"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -2752,7 +2752,7 @@ def _try_auto_register() -> None:
     if not _sync_config.get("auto_register"):
         _state.broadcast({
             "ts": ts, "level": "info",
-            "message": "[AUTO] 远注未牍囱∝苍蹲⑨」",
+            "message": "[AUTO] 自动注册未启用",
             "step": "auto_register",
         })
         return
@@ -2768,7 +2768,7 @@ def _try_auto_register() -> None:
     if _state.status != "idle":
         _state.broadcast({
             "ts": ts, "level": "info",
-            "message": f"[AUTO] 远注幔呵白刺?{_state.status}",
+            "message": f"[AUTO] 当前任务状态为 {_state.status}，跳过自动注册",
             "step": "auto_register",
         })
         return
@@ -2787,7 +2787,7 @@ def _try_auto_register() -> None:
             api_error = True
             _state.broadcast({
                 "ts": ts, "level": "warn",
-                "message": f"[AUTO] CPA 状态询失埽院: {e}",
+                "message": f"[AUTO] CPA 状态查询失败: {e}",
                 "step": "auto_register",
             })
     sm = _get_sub2api_maintainer()
@@ -2798,13 +2798,13 @@ def _try_auto_register() -> None:
             api_error = True
             _state.broadcast({
                 "ts": ts, "level": "warn",
-                "message": f"[AUTO] Sub2Api 状态询失埽院: {e}",
+                "message": f"[AUTO] Sub2Api 状态查询失败: {e}",
                 "step": "auto_register",
             })
     elif sm:
         _state.broadcast({
             "ts": ts, "level": "info",
-            "message": "[AUTO] Sub2Api 远同未远沤 CPA 缺执",
+            "message": "[AUTO] Sub2Api 自动同步未启用，仅按 CPA 缺口补号",
             "step": "auto_register",
         })
     gap = (cpa_gap + sub2api_gap) if upload_mode == "snapshot" else max(cpa_gap, sub2api_gap)
@@ -2813,7 +2813,7 @@ def _try_auto_register() -> None:
     if gap <= 0:
         _state.broadcast({
             "ts": ts, "level": "info",
-            "message": "[AUTO] 殉悖补注",
+            "message": "[AUTO] 无需补号",
             "step": "auto_register",
         })
         return
@@ -2831,15 +2831,15 @@ def _try_auto_register() -> None:
         _state.broadcast({
             "ts": ts, "level": "success",
             "message": (
-                f"[AUTO] 远注懿 {gap}CPA 缺 {cpa_gap} / Sub2Api 缺 {sub2api_gap} / "
-                f" {upload_mode}"
+                f"[AUTO] 自动补号启动：总缺口 {gap}，CPA 缺口 {cpa_gap}，"
+                f"Sub2Api 缺口 {sub2api_gap}，模式 {upload_mode}"
             ),
             "step": "auto_register",
         })
     except RuntimeError as e:
         _state.broadcast({
             "ts": ts, "level": "warn",
-            "message": f"[AUTO] 远注失埽{e}",
+            "message": f"[AUTO] 自动注册启动失败: {e}",
             "step": "auto_register",
         })
 
@@ -2870,7 +2870,7 @@ def _try_local_auto_register(current_count: Optional[int] = None) -> None:
         _state.broadcast({
             "ts": ts,
             "level": "warn",
-            "message": "[LOCAL] 远牛未霉潭掖未",
+            "message": "[LOCAL] 缺少可用代理，无法自动补号",
             "step": "local_auto",
         })
         return
@@ -2878,7 +2878,7 @@ def _try_local_auto_register(current_count: Optional[int] = None) -> None:
         _state.broadcast({
             "ts": ts,
             "level": "info",
-            "message": f"[LOCAL] 远牛前状态 {_state.status}",
+            "message": f"[LOCAL] 当前任务状态为 {_state.status}，跳过本地自动补号",
             "step": "local_auto",
         })
         return
@@ -2890,14 +2890,14 @@ def _try_local_auto_register(current_count: Optional[int] = None) -> None:
         _state.broadcast({
             "ts": ts,
             "level": "success",
-            "message": f"[LOCAL] 效撕 {current_count}/{expected}远 {gap} ",
+            "message": f"[LOCAL] 当前 {current_count}/{expected}，自动补号 {gap} 个",
             "step": "local_auto",
         })
     except RuntimeError as e:
         _state.broadcast({
             "ts": ts,
             "level": "warn",
-            "message": f"[LOCAL] 远失埽{e}",
+            "message": f"[LOCAL] 本地自动补号启动失败: {e}",
             "step": "local_auto",
         })
 
@@ -2915,7 +2915,7 @@ def _start_local_auto_maintain() -> None:
                 _state.broadcast({
                     "ts": datetime.now().strftime("%H:%M:%S"),
                     "level": "warn",
-                    "message": "[LOCAL] 自动测活线程已停止",
+                    "message": "[LOCAL] 自动保活正在运行，跳过本轮",
                     "step": "local_auto",
                 })
             else:
@@ -2925,10 +2925,10 @@ def _start_local_auto_maintain() -> None:
                         "ts": datetime.now().strftime("%H:%M:%S"),
                         "level": "info",
                         "message": (
-                            f"[LOCAL] 远:  {result.get('checked', 0)}, "
-                            f"效 {result.get('invalid_count', 0)}, "
-                            f"删 {result.get('deleted_ok', 0)}, "
-                            f" {result.get('remaining', 0)}"
+                            f"[LOCAL] 保活完成: 检查 {result.get('checked', 0)}，"
+                            f"失效 {result.get('invalid_count', 0)}，"
+                            f"删除 {result.get('deleted_ok', 0)}，"
+                            f"剩余 {result.get('remaining', 0)}"
                         ),
                         "step": "local_auto",
                     })
@@ -2937,7 +2937,7 @@ def _start_local_auto_maintain() -> None:
                     _state.broadcast({
                         "ts": datetime.now().strftime("%H:%M:%S"),
                         "level": "error",
-                        "message": f"[LOCAL] 远斐? {e}",
+                        "message": f"[LOCAL] 本地保活执行异常: {e}",
                         "step": "local_auto",
                     })
                 finally:
@@ -2972,7 +2972,7 @@ def _start_auto_maintain() -> None:
                     _state.broadcast({
                         "ts": datetime.now().strftime("%H:%M:%S"),
                         "level": "warn",
-                        "message": "[POOL] 远维维执",
+                        "message": "[POOL] 自动维护正在运行，跳过本轮",
                         "step": "pool_auto",
                     })
                 else:
@@ -2984,9 +2984,9 @@ def _start_auto_maintain() -> None:
                             "ts": datetime.now().strftime("%H:%M:%S"),
                             "level": "info",
                             "message": (
-                                f"[POOL] 远维: 效 {result.get('invalid_count', 0)}, "
-                                f"删 {result.get('deleted_ok', 0)}, "
-                                f"同删 {result.get('local_deleted_ok', 0)}"
+                                f"[POOL] 自动维护: 失效 {result.get('invalid_count', 0)}，"
+                                f"删除 {result.get('deleted_ok', 0)}，"
+                                f"同步删除 {result.get('local_deleted_ok', 0)}"
                             ),
                             "step": "pool_auto",
                         })
@@ -2994,7 +2994,7 @@ def _start_auto_maintain() -> None:
                         _state.broadcast({
                             "ts": datetime.now().strftime("%H:%M:%S"),
                             "level": "error",
-                            "message": f"[POOL] 远维斐? {e}",
+                            "message": f"[POOL] 自动维护异常: {e}",
                             "step": "pool_auto",
                         })
                     finally:
@@ -3051,9 +3051,9 @@ async def api_sub2api_pool_maintain() -> Dict[str, Any]:
             "ts": datetime.now().strftime("%H:%M:%S"),
             "level": "info",
             "message": (
-                f"[Sub2Api] 维: 斐?{result.get('error_count', 0)}, "
-                f"刷 {result.get('refreshed', 0)}, "
-                f"删 {result.get('deleted_ok', 0)}"
+                f"[Sub2Api] 维护: 异常 {result.get('error_count', 0)}，"
+                f"刷新 {result.get('refreshed', 0)}，"
+                f"删除 {result.get('deleted_ok', 0)}"
             ),
             "step": "sub2api_maintain",
         })
@@ -3079,7 +3079,7 @@ def _start_sub2api_auto_maintain() -> None:
                     _state.broadcast({
                         "ts": datetime.now().strftime("%H:%M:%S"),
                         "level": "warn",
-                        "message": "[Sub2Api] 远维维执",
+                        "message": "[Sub2Api] 自动维护正在运行，跳过本轮",
                         "step": "sub2api_auto",
                     })
                 else:
@@ -3089,9 +3089,9 @@ def _start_sub2api_auto_maintain() -> None:
                             "ts": datetime.now().strftime("%H:%M:%S"),
                             "level": "info",
                             "message": (
-                                f"[Sub2Api] 远维: 斐?{result.get('error_count', 0)}, "
-                                f"刷 {result.get('refreshed', 0)}, "
-                                f"删 {result.get('deleted_ok', 0)}"
+                                f"[Sub2Api] 自动维护: 异常 {result.get('error_count', 0)}，"
+                                f"刷新 {result.get('refreshed', 0)}，"
+                                f"删除 {result.get('deleted_ok', 0)}"
                             ),
                             "step": "sub2api_auto",
                         })
@@ -3099,7 +3099,7 @@ def _start_sub2api_auto_maintain() -> None:
                         _state.broadcast({
                             "ts": datetime.now().strftime("%H:%M:%S"),
                             "level": "error",
-                            "message": f"[Sub2Api] 远维斐? {e}",
+                            "message": f"[Sub2Api] 自动维护异常: {e}",
                             "step": "sub2api_auto",
                         })
                     finally:
