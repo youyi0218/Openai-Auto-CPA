@@ -21,6 +21,19 @@
   cursor: pointer;
 }
 
+#opa-orchestrator-nav-item .opa-nav-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#opa-orchestrator-nav-item .opa-nav-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.92;
+}
+
 #opa-orchestrator-nav-item.opa-nav-active {
   background: rgba(139, 134, 128, 0.15) !important;
 }

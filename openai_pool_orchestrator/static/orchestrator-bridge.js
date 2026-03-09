@@ -831,6 +831,22 @@
       .join(' ');
   }
 
+  function activateBridgeRoute() {
+    const target = BRIDGE_ROUTE_HASH;
+    if (String(window.location.hash || '') !== target) {
+      window.location.hash = target;
+    }
+    scheduleBridgeSync();
+    [120, 320, 700].forEach((delay) => {
+      window.setTimeout(() => {
+        if (!isBridgeRoute()) {
+          window.location.hash = target;
+        }
+        scheduleBridgeSync();
+      }, delay);
+    });
+  }
+
   function findSidebarNavContainer() {
     const sidebar = document.querySelector('aside[class*="sidebar"]') || document.querySelector('aside') || document.querySelector('[class*="sidebar"]');
     if (!sidebar) return null;
@@ -853,13 +869,15 @@
       item.addEventListener('click', function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        if (String(window.location.hash || '') !== BRIDGE_ROUTE_HASH) {
-          window.location.hash = BRIDGE_ROUTE_HASH;
-        } else {
-          scheduleBridgeSync();
-        }
+        activateBridgeRoute();
       });
-      item.innerHTML = '<span>注册机</span>';
+      item.innerHTML =
+        '<span class="opa-nav-entry">' +
+          '<svg class="opa-nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+            '<path d="M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2M8 8h8v8H8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>' +
+          '</svg>' +
+          '<span>注册机</span>' +
+        '</span>';
 
       if (wrapSample) {
         const wrap = document.createElement(wrapSample.tagName || 'div');
