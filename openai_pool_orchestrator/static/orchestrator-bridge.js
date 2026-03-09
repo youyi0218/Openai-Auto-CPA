@@ -9,14 +9,15 @@
     { id: 'duckmail', label: 'DuckMail' },
     { id: 'cloudflare_temp_email', label: 'Cloudflare Temp Email' }
   ];
-  const BRIDGE_ROUTE_HASH = '#/?opa_view=orchestrator';
-  const BRIDGE_ROUTE_LEGACY_HASH = '#/orchestrator';
+  const BRIDGE_ROUTE_HASH = '#/orchestrator';
+  const BRIDGE_ROUTE_COMPAT_HASH = '#/?opa_view=orchestrator';
   const BRIDGE_ROUTE_PATH = '/';
   const BRIDGE_ROUTE_QUERY_KEY = 'opa_view';
   const BRIDGE_ROUTE_QUERY_VALUE = 'orchestrator';
   const BRIDGE_NAV_ID = 'opa-orchestrator-nav-item';
   const BRIDGE_NAV_WRAP_ID = 'opa-orchestrator-nav-wrap';
   const BRIDGE_HOST_ID = 'opa-orchestrator-route-host';
+  const BRIDGE_PREV_CURRENT_ATTR = 'data-opa-prev-aria-current';
   const BRIDGE_API_KEY_STORAGE = 'opa_bridge_api_key';
   const BRIDGE_API_KEY_QUERY = 'api_key';
   const RUN_LOG_STREAM_ID = 'opaRunStream';
@@ -37,6 +38,7 @@
   let bridgeApiPrompted = false;
   let runLogStream = null;
   let runLogErrorLogged = false;
+  let runLogReconnectTimer = null;
 
   const qs = (id) => document.getElementById(id);
   const qsa = (selector) => Array.from(document.querySelectorAll(selector));
@@ -207,7 +209,7 @@
   }
 
   function openRunLogStream() {
-    if (runLogStream) return;
+    if (runLogStream || runLogReconnectTimer) return;
 
     let streamUrl = '/api/logs';
     const apiKey = getApiKey();
@@ -241,10 +243,23 @@
       if (runLogErrorLogged) return;
       runLogErrorLogged = true;
       appendRunLogLine({ level: 'warn', step: 'logs', message: 'Log stream disconnected, retrying...' });
+      if (runLogStream && runLogStream.readyState === 2) {
+        closeRunLogStream();
+        if (!runLogReconnectTimer) {
+          runLogReconnectTimer = window.setTimeout(() => {
+            runLogReconnectTimer = null;
+            openRunLogStream();
+          }, 1500);
+        }
+      }
     };
   }
 
   function closeRunLogStream() {
+    if (runLogReconnectTimer) {
+      window.clearTimeout(runLogReconnectTimer);
+      runLogReconnectTimer = null;
+    }
     if (!runLogStream) return;
     try {
       runLogStream.close();
@@ -782,14 +797,38 @@
   function isBridgeRoute() {
     const hash = String(window.location.hash || '');
     if (
-      hash === BRIDGE_ROUTE_LEGACY_HASH ||
-      hash.startsWith(BRIDGE_ROUTE_LEGACY_HASH + '/') ||
-      hash.startsWith(BRIDGE_ROUTE_LEGACY_HASH + '?')
+      hash === BRIDGE_ROUTE_HASH ||
+      hash.startsWith(BRIDGE_ROUTE_HASH + '/') ||
+      hash.startsWith(BRIDGE_ROUTE_HASH + '?')
     ) {
       return true;
     }
     const route = parseHashRoute();
     return route.path === BRIDGE_ROUTE_PATH && route.params.get(BRIDGE_ROUTE_QUERY_KEY) === BRIDGE_ROUTE_QUERY_VALUE;
+  }
+
+  function normalizeBridgeHash() {
+    const hash = String(window.location.hash || '');
+    if (!hash || hash === BRIDGE_ROUTE_HASH) return false;
+    if (hash === BRIDGE_ROUTE_COMPAT_HASH) {
+      window.location.hash = BRIDGE_ROUTE_HASH;
+      return true;
+    }
+    const route = parseHashRoute();
+    if (route.path === BRIDGE_ROUTE_PATH && route.params.get(BRIDGE_ROUTE_QUERY_KEY) === BRIDGE_ROUTE_QUERY_VALUE) {
+      window.location.hash = BRIDGE_ROUTE_HASH;
+      return true;
+    }
+    return false;
+  }
+
+  function stripActiveLikeClasses(className) {
+    return String(className || '')
+      .split(/\s+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((name) => !/(^|[-_])(active|selected|current)([-_]|$)/i.test(name))
+      .join(' ');
   }
 
   function findSidebarNavContainer() {
@@ -810,7 +849,7 @@
       item = document.createElement('a');
       item.id = BRIDGE_NAV_ID;
       item.href = BRIDGE_ROUTE_HASH;
-      item.className = sample && sample.className ? sample.className : '';
+      item.className = stripActiveLikeClasses(sample && sample.className ? sample.className : '');
       item.addEventListener('click', function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
@@ -825,7 +864,7 @@
       if (wrapSample) {
         const wrap = document.createElement(wrapSample.tagName || 'div');
         wrap.id = BRIDGE_NAV_WRAP_ID;
-        wrap.className = wrapSample.className || '';
+        wrap.className = stripActiveLikeClasses(wrapSample.className || '');
         wrap.appendChild(item);
         navContainer.appendChild(wrap);
       } else {
@@ -833,8 +872,37 @@
       }
     }
 
-    item.classList.toggle('opa-nav-active', isBridgeRoute());
-    item.setAttribute('aria-current', isBridgeRoute() ? 'page' : 'false');
+    const active = isBridgeRoute();
+    item.classList.toggle('opa-nav-active', active);
+    if (active) {
+      item.setAttribute('aria-current', 'page');
+    } else {
+      item.removeAttribute('aria-current');
+    }
+  }
+
+  function syncNativeNavSelection(active) {
+    const navContainer = findSidebarNavContainer();
+    if (!navContainer) return;
+
+    const candidates = Array.from(navContainer.querySelectorAll('a,button,[role="button"]'));
+    candidates.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      if (node.id === BRIDGE_NAV_ID || node.closest('#' + BRIDGE_NAV_WRAP_ID)) return;
+
+      if (active) {
+        if (node.getAttribute('aria-current') === 'page') {
+          node.setAttribute(BRIDGE_PREV_CURRENT_ATTR, 'page');
+          node.removeAttribute('aria-current');
+        }
+        return;
+      }
+
+      if (node.getAttribute(BRIDGE_PREV_CURRENT_ATTR) === 'page') {
+        node.setAttribute('aria-current', 'page');
+      }
+      node.removeAttribute(BRIDGE_PREV_CURRENT_ATTR);
+    });
   }
 
   function findMainContainer() {
@@ -876,8 +944,10 @@
 
   function applyBridgeRouteVisibility() {
     if (!bridgeRoot) return;
+    if (normalizeBridgeHash()) return;
     ensureBridgeNavItem();
     const active = isBridgeRoute();
+    syncNativeNavSelection(active);
     const host = ensureBridgeHost();
     if (host && bridgeRoot.parentElement !== host) {
       host.appendChild(bridgeRoot);

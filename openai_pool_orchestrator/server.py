@@ -374,6 +374,7 @@ app = FastAPI(title="OpenAI Pool Orchestrator", version=__version__)
 
 BRIDGE_PUBLIC_API_PATHS = {
     "/api/auth/status",
+    "/api/logs",
     "/api/status",
     "/api/start",
     "/api/stop",
