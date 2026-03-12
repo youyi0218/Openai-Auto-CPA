@@ -3,13 +3,13 @@ name = "openai-pool-orchestrator"
 version = "2.0.0"
 description = "OpenAI 账号池编排器 — 自动化注册、Token 管理与多平台账号池维护"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "GPL-3.0-only"}
 requires-python = ">=3.10"
 keywords = ["openai", "account-pool", "automation", "token-management"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

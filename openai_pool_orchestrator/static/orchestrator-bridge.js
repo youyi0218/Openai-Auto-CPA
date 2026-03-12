@@ -9,6 +9,11 @@
     { id: 'duckmail', label: 'DuckMail' },
     { id: 'cloudflare_temp_email', label: 'Cloudflare Temp Email' }
   ];
+  const PROXY_POOL_PROVIDERS = [
+    { id: 'zenproxy_api', label: 'ZenProxy API', defaultUrl: 'https://zenproxy.top/api/fetch' },
+    { id: 'dreamy_socks5_pool', label: 'Dreamy SOCKS5', defaultUrl: 'socks5://127.0.0.1:1080' },
+    { id: 'docker_warp_socks', label: 'Docker WARP SOCKS', defaultUrl: 'socks5://127.0.0.1:9091' }
+  ];
   const BRIDGE_ROUTE_HASH = '#/?opa_view=orchestrator';
   const BRIDGE_ROUTE_COMPAT_HASH = '#/orchestrator';
   const BRIDGE_ROUTE_PATH = '/';
@@ -24,6 +29,7 @@
   const RUN_LOG_CLEAR_ID = 'opaRunLogClear';
   const SECTION_LOG_IDS = {
     realtime: 'opaLogRealtime',
+    proxy_pool: 'opaLogProxyPool',
     register: 'opaLogRegister',
     maintain: 'opaLogMaintain',
     cpa: 'opaLogCpa',
@@ -320,7 +326,9 @@
           ipt.dataset.masked = '0';
           ipt.dataset.dirty = '0';
         } else {
-          const sec = inputId === 'opaCpaToken' ? 'cpa' : 'mail';
+          const sec = inputId === 'opaCpaToken'
+            ? 'cpa'
+            : (inputId === 'opaProxyPoolApiKey' ? 'proxy_pool' : 'mail');
           logSection(sec, '掩码值无法直接显示，请重新输入真实值。', 'error');
           return;
         }
@@ -362,6 +370,51 @@
               <button id="opaRefresh" class="opa-bridge-btn" type="button">刷新状态</button>
             </div>
             <div id="opaRunningStatus" class="opa-bridge-status">状态: --</div>
+          </section>
+
+          <section class="opa-bridge-card">
+            <h4>代理池配置</h4>
+            <div class="opa-bridge-grid">
+              <div class="opa-bridge-field">
+                <label>Provider</label>
+                <select id="opaProxyPoolProvider">
+                  <option value="zenproxy_api">ZenProxy API</option>
+                  <option value="dreamy_socks5_pool">Dreamy SOCKS5</option>
+                  <option value="docker_warp_socks">Docker WARP SOCKS</option>
+                </select>
+              </div>
+              <div class="opa-bridge-field">
+                <label>Auth Mode</label>
+                <select id="opaProxyPoolAuthMode">
+                  <option value="query">query</option>
+                  <option value="header">header</option>
+                </select>
+              </div>
+              <div class="opa-bridge-field">
+                <label>API URL / Fixed Proxy</label>
+                <input id="opaProxyPoolApiUrl" type="text" placeholder="https://zenproxy.top/api/fetch" />
+              </div>
+              <div class="opa-bridge-field">
+                <label>API Key</label>
+                <div class="opa-secret-wrap">
+                  <input id="opaProxyPoolApiKey" type="password" autocomplete="off" />
+                  <button class="opa-secret-eye" id="opaProxyPoolApiKeyEye" data-eye-for="opaProxyPoolApiKey" type="button">显示</button>
+                </div>
+              </div>
+              <div class="opa-bridge-field">
+                <label>Count</label>
+                <input id="opaProxyPoolCount" type="number" min="1" max="20" value="1" />
+              </div>
+              <div class="opa-bridge-field">
+                <label>Country</label>
+                <input id="opaProxyPoolCountry" type="text" maxlength="2" placeholder="US" />
+              </div>
+            </div>
+            <label class="opa-bridge-check"><input id="opaProxyPoolEnabled" type="checkbox" />启用代理池</label>
+            <div class="opa-bridge-actions">
+              <button id="opaSaveProxyPool" class="opa-bridge-btn primary" type="button">保存代理池</button>
+              <button id="opaTestProxyPool" class="opa-bridge-btn" type="button">测试代理池</button>
+            </div>
           </section>
 
           <section class="opa-bridge-card">
@@ -569,6 +622,7 @@
 
     const logTargets = [
       ['opaRunningStatus', 'opaLogRealtime'],
+      ['opaSaveProxyPool', 'opaLogProxyPool'],
       ['opaSaveRegister', 'opaLogRegister'],
       ['opaSaveMaintain', 'opaLogMaintain'],
       ['opaSaveCpa', 'opaLogCpa'],
@@ -700,6 +754,46 @@
     }
 
     return configs;
+  }
+
+  function proxyPoolDefaultUrl(provider) {
+    const hit = PROXY_POOL_PROVIDERS.find((item) => item.id === provider);
+    return hit ? hit.defaultUrl : 'https://zenproxy.top/api/fetch';
+  }
+
+  function syncProxyPoolDefaults(forceUrl) {
+    const provider = readText('opaProxyPoolProvider') || 'zenproxy_api';
+    const apiUrlEl = qs('opaProxyPoolApiUrl');
+    const authModeEl = qs('opaProxyPoolAuthMode');
+    if (!apiUrlEl || !authModeEl) return;
+
+    const defaultUrl = proxyPoolDefaultUrl(provider);
+    const currentUrl = String(apiUrlEl.value || '').trim();
+    if (forceUrl || !currentUrl) {
+      apiUrlEl.value = defaultUrl;
+    }
+
+    const fixedProxyProvider = provider === 'dreamy_socks5_pool' || provider === 'docker_warp_socks';
+    authModeEl.disabled = fixedProxyProvider;
+    if (fixedProxyProvider) {
+      authModeEl.value = 'query';
+    }
+  }
+
+  async function loadProxyPoolConfig() {
+    try {
+      const d = await api('/api/proxy-pool/config');
+      qs('opaProxyPoolEnabled').checked = !!d.proxy_pool_enabled;
+      fillTextField('opaProxyPoolApiUrl', d.proxy_pool_api_url || '');
+      fillTextField('opaProxyPoolCountry', d.proxy_pool_country || 'US');
+      fillTextField('opaProxyPoolCount', d.proxy_pool_count || 1);
+      qs('opaProxyPoolProvider').value = d.proxy_pool_provider || 'zenproxy_api';
+      qs('opaProxyPoolAuthMode').value = d.proxy_pool_auth_mode || 'query';
+      fillSecretField('opaProxyPoolApiKey', d, ['proxy_pool_api_key', 'api_key']);
+      syncProxyPoolDefaults(false);
+    } catch (e) {
+      logSection('proxy_pool', '加载代理池配置失败: ' + e.message, 'error');
+    }
   }
 
   async function loadMailConfig() {
@@ -995,6 +1089,7 @@
 
     if (active && !bridgePrevActive) {
       loadProxyConfig();
+      loadProxyPoolConfig();
       loadPoolConfig();
       loadMailConfig();
       refreshStatus();
@@ -1029,12 +1124,14 @@
     if (close && panel) close.addEventListener('click', () => panel.classList.remove('open'));
 
     bindSecretEye('opaCpaToken', 'opaCpaTokenEye');
+    bindSecretEye('opaProxyPoolApiKey', 'opaProxyPoolApiKeyEye');
     bindSecretEye('opaMoemailApiKey', 'opaMoemailApiKeyEye');
     bindSecretEye('opaDuckmailBearerToken', 'opaDuckmailBearerTokenEye');
     bindSecretEye('opaCfSitePassword', 'opaCfSitePasswordEye');
     bindSecretEye('opaCfAdminPassword', 'opaCfAdminPasswordEye');
 
     markSecretDirty(qs('opaCpaToken'));
+    markSecretDirty(qs('opaProxyPoolApiKey'));
     markSecretDirty(qs('opaMoemailApiKey'));
     markSecretDirty(qs('opaDuckmailBearerToken'));
     markSecretDirty(qs('opaCfSitePassword'));
@@ -1043,10 +1140,29 @@
     qsa('#opaMailProviderPicks input[data-provider]').forEach((el) => {
       el.addEventListener('change', () => syncMailPrimaryOptions(qs('opaMailPrimary').value));
     });
+    const proxyPoolProvider = qs('opaProxyPoolProvider');
+    if (proxyPoolProvider) {
+      proxyPoolProvider.addEventListener('change', () => syncProxyPoolDefaults(false));
+    }
 
     const onClick = (id, fn) => {
       const el = qs(id);
       if (el) el.addEventListener('click', fn);
+    };
+
+    const buildProxyPoolPayload = () => {
+      const keyEl = qs('opaProxyPoolApiKey');
+      const keyState = keyEl ? getSecretState(keyEl) : { masked: false, clear: false, trimmed: '' };
+      return {
+        proxy_pool_enabled: !!qs('opaProxyPoolEnabled')?.checked,
+        proxy_pool_provider: readText('opaProxyPoolProvider') || 'zenproxy_api',
+        proxy_pool_api_url: readText('opaProxyPoolApiUrl'),
+        proxy_pool_auth_mode: readText('opaProxyPoolAuthMode') || 'query',
+        proxy_pool_api_key: keyState.masked ? '' : keyState.trimmed,
+        clear_proxy_pool_api_key: !!keyState.clear,
+        proxy_pool_count: Math.max(1, Math.min(20, num(qs('opaProxyPoolCount')?.value, 1))),
+        proxy_pool_country: (readText('opaProxyPoolCountry') || 'US').toUpperCase()
+      };
     };
 
     onClick(RUN_LOG_CLEAR_ID, () => {
@@ -1093,6 +1209,53 @@
         }
       } catch (e) {
         logSection('realtime', '代理检测异常: ' + e.message, 'error');
+      }
+    });
+
+    onClick('opaSaveProxyPool', async () => {
+      logSection('proxy_pool', '正在保存代理池配置...');
+      try {
+        const payload = buildProxyPoolPayload();
+        await api('/api/proxy-pool/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        await loadProxyPoolConfig();
+        logSection('proxy_pool', '代理池配置已保存');
+      } catch (e) {
+        logSection('proxy_pool', '保存失败: ' + e.message, 'error');
+      }
+    });
+
+    onClick('opaTestProxyPool', async () => {
+      logSection('proxy_pool', '正在测试代理池...');
+      try {
+        const payload = buildProxyPoolPayload();
+        const d = await api('/api/proxy-pool/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: payload.proxy_pool_enabled,
+            provider: payload.proxy_pool_provider,
+            api_url: payload.proxy_pool_api_url,
+            auth_mode: payload.proxy_pool_auth_mode,
+            api_key: payload.proxy_pool_api_key,
+            count: payload.proxy_pool_count,
+            country: payload.proxy_pool_country
+          })
+        });
+        if (d.ok) {
+          const detail = [];
+          if (d.provider) detail.push('provider=' + d.provider);
+          if (d.proxy) detail.push('proxy=' + d.proxy);
+          if (d.loc) detail.push('loc=' + d.loc);
+          logSection('proxy_pool', '代理池测试通过' + (detail.length ? ' | ' + detail.join(' | ') : ''));
+        } else {
+          logSection('proxy_pool', '代理池测试失败: ' + (d.error || d.message || '--'), 'error');
+        }
+      } catch (e) {
+        logSection('proxy_pool', '代理池测试异常: ' + e.message, 'error');
       }
     });
 
@@ -1297,6 +1460,7 @@
     onClick('opaRefresh', async () => {
       refreshStatus();
       await loadProxyConfig();
+      await loadProxyPoolConfig();
       await loadPoolConfig();
       await loadMailConfig();
       logSection('realtime', '数据已刷新');
