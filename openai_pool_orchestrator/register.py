@@ -485,6 +485,20 @@ def get_email_and_token(
         return "", ""
 
 
+def generate_account_password(length: int = 14) -> str:
+    alphabet = string.ascii_letters + string.digits
+    if length < 10:
+        length = 10
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(ch.islower() for ch in password)
+            and any(ch.isupper() for ch in password)
+            and any(ch.isdigit() for ch in password)
+        ):
+            return password
+
+
 def get_oai_code(
     token: str, email: str, proxies: Any = None, emitter: EventEmitter = _cli_emitter,
     stop_event: Optional[threading.Event] = None,
@@ -755,6 +769,7 @@ def submit_callback_url(
     code_verifier: str,
     redirect_uri: str = DEFAULT_REDIRECT_URI,
     proxy: str = "",
+    account_password: str = "",
 ) -> str:
     cb = _parse_callback_url(callback_url)
     if cb["error"]:
@@ -806,6 +821,8 @@ def submit_callback_url(
         "type": "codex",
         "expired": expired_rfc3339,
     }
+    if account_password:
+        config["password"] = account_password
 
     return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
 
@@ -1150,6 +1167,7 @@ def run(
         expected_state: str,
         code_verifier: str,
         redirect_uri: str = DEFAULT_REDIRECT_URI,
+        account_password: str = "",
     ) -> str:
         cb = _parse_callback_url(callback_url)
         if cb["error"]:
@@ -1216,10 +1234,172 @@ def run(
             "type": "codex",
             "expired": expired_rfc3339,
         }
+        if account_password:
+            config["password"] = account_password
         return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
 
     def _stopped() -> bool:
         return stop_event is not None and stop_event.is_set()
+
+    def _extract_or_create_device_id(init_resp: Any, step: str) -> str:
+        did_value = s.cookies.get("oai-did") or relay_cookie_jar.get("oai-did") or ""
+        if not did_value:
+            did_m = re.search(r"oai-did=([0-9a-fA-F-]{20,})", str(init_resp.text or ""))
+            if did_m:
+                did_value = did_m.group(1)
+        if not did_value:
+            did_value = str(uuid.uuid4())
+            emitter.warn(f"未从响应提取到 oai-did，已使用临时 Device ID: {did_value}", step=step)
+        relay_cookie_jar["oai-did"] = did_value
+        try:
+            s.cookies.set("oai-did", did_value)
+        except Exception:
+            pass
+        emitter.info(f"Device ID: {did_value}", step=step)
+        return did_value
+
+    def _fetch_sentinel(device_id: str, flow: str, step: str) -> str:
+        emitter.info("正在获取 Sentinel Token...", step=step)
+        req_body = json.dumps(
+            {"p": "", "id": device_id, "flow": flow},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        sen_resp = _raw_post(
+            "https://sentinel.openai.com/backend-api/sentinel/req",
+            headers={
+                "origin": "https://sentinel.openai.com",
+                "referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
+                "content-type": "text/plain;charset=UTF-8",
+            },
+            data=req_body,
+        )
+        if sen_resp.status_code != 200:
+            emitter.error(f"Sentinel 异常拦截，状态码: {sen_resp.status_code}", step=step)
+            return ""
+        try:
+            sen_token = str((sen_resp.json() or {}).get("token") or "").strip()
+        except Exception:
+            sen_token = ""
+        if not sen_token:
+            emitter.error("Sentinel Token 解析失败", step=step)
+            return ""
+        emitter.success("Sentinel Token 获取成功", step=step)
+        return json.dumps(
+            {"p": "", "t": "", "c": sen_token, "id": device_id, "flow": flow},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    def _wait_for_openai_otp(timeout: int = 120) -> str:
+        if mail_provider is not None:
+            try:
+                return mail_provider.wait_for_otp(
+                    dev_token,
+                    email,
+                    proxy=static_proxy,
+                    proxy_selector=mail_proxy_selector,
+                    timeout=timeout,
+                    stop_event=stop_event,
+                )
+            except TypeError:
+                return mail_provider.wait_for_otp(
+                    dev_token,
+                    email,
+                    proxy=static_proxy,
+                    timeout=timeout,
+                    stop_event=stop_event,
+                )
+        return get_oai_code(
+            dev_token,
+            email,
+            static_proxies,
+            emitter,
+            stop_event,
+            proxy_selector=mail_proxies_selector,
+        )
+
+    def _exchange_callback(callback_url: str, oauth_ctx: OAuthStart) -> str:
+        if pool_relay_enabled and not _should_bypass_relay_for_target(TOKEN_URL):
+            try:
+                return _submit_callback_url_via_pool_relay(
+                    callback_url=callback_url,
+                    code_verifier=oauth_ctx.code_verifier,
+                    redirect_uri=oauth_ctx.redirect_uri,
+                    expected_state=oauth_ctx.state,
+                    account_password=account_password,
+                )
+            except Exception as exc:
+                _warn_relay_fallback(str(exc), TOKEN_URL)
+        return submit_callback_url(
+            callback_url=callback_url,
+            code_verifier=oauth_ctx.code_verifier,
+            redirect_uri=oauth_ctx.redirect_uri,
+            expected_state=oauth_ctx.state,
+            proxy=(static_proxy if pool_relay_enabled else _next_proxy_value()),
+            account_password=account_password,
+        )
+
+    def _complete_workspace_and_exchange(oauth_ctx: OAuthStart, continue_url: str) -> Optional[str]:
+        current_url = str(continue_url or "").strip()
+        if current_url and "code=" in current_url and "state=" in current_url:
+            emitter.success("Token 获取成功！", step="get_token")
+            return _exchange_callback(current_url, oauth_ctx)
+
+        emitter.info("正在解析 Workspace 信息...", step="workspace")
+        auth_cookie = s.cookies.get("oai-client-auth-session") or relay_cookie_jar.get("oai-client-auth-session") or ""
+        if auth_cookie:
+            auth_json = _decode_jwt_segment(auth_cookie.split(".")[0])
+            workspaces = auth_json.get("workspaces") or []
+            workspace_id = str((workspaces[0] or {}).get("id") or "").strip() if workspaces else ""
+            if workspace_id:
+                select_resp = _session_post(
+                    "https://auth.openai.com/api/accounts/workspace/select",
+                    headers={
+                        "referer": "https://auth.openai.com/sign-in-with-chatgpt/codex/consent",
+                        "content-type": "application/json",
+                    },
+                    json={"workspace_id": workspace_id},
+                )
+                if select_resp.status_code != 200:
+                    emitter.error(f"选择 workspace 失败，状态码: {select_resp.status_code}", step="workspace")
+                    emitter.error(select_resp.text, step="workspace")
+                    return None
+                emitter.success(f"Workspace 选择成功: {workspace_id}", step="workspace")
+                try:
+                    current_url = str((select_resp.json() or {}).get("continue_url") or current_url).strip()
+                except Exception:
+                    current_url = current_url.strip()
+            else:
+                emitter.warn("授权 Cookie 中未解析到 workspace_id，直接跟随 continue_url", step="workspace")
+        else:
+            emitter.warn("未获取到授权 Cookie，直接跟随 continue_url", step="workspace")
+
+        if not current_url:
+            emitter.error("未找到可继续的 OAuth 回调地址", step="get_token")
+            return None
+
+        emitter.info("正在获取最终 OAuth Token...", step="get_token")
+        for _ in range(8):
+            if _stopped():
+                return None
+            if "code=" in current_url and "state=" in current_url:
+                result = _exchange_callback(current_url, oauth_ctx)
+                emitter.success("Token 获取成功！", step="get_token")
+                return result
+            final_resp = _session_get(current_url, allow_redirects=False, timeout=15)
+            location = final_resp.headers.get("Location") or ""
+            if final_resp.status_code not in [301, 302, 303, 307, 308] or not location:
+                break
+            current_url = urllib.parse.urljoin(current_url, location)
+
+        emitter.error("未能在重定向链中捕获到最终 Callback URL", step="get_token")
+        return None
+
+    def _reset_auth_session() -> None:
+        nonlocal s
+        s = requests.Session(impersonate="chrome")
+        relay_cookie_jar.clear()
 
     try:
         # ------- 步骤1：网络环境检查 -------
@@ -1297,67 +1477,34 @@ def run(
                 emitter.error("temporary mailbox create failed", step="create_email")
             return None
         emitter.success(f"临时邮箱创建成功: {email}", step="create_email")
+        account_password = generate_account_password()
 
         if _stopped():
             return None
 
         # ------- 步骤3：生成 OAuth URL，获取 Device ID -------
         emitter.info("正在生成 OAuth 授权链接...", step="oauth_init")
-        oauth = generate_oauth_url()
-        url = oauth.auth_url
-
-        resp = _session_get(url, timeout=20)
+        signup_oauth = generate_oauth_url()
+        resp = _session_get(signup_oauth.auth_url, timeout=20)
         emitter.info(f"OAuth 初始化状态: {resp.status_code}", step="oauth_init")
         if resp.status_code >= 400:
             emitter.error(f"OAuth 初始化失败，状态码: {resp.status_code}", step="oauth_init")
             return None
-        did = s.cookies.get("oai-did") or relay_cookie_jar.get("oai-did") or ""
-        if not did:
-            did_m = re.search(r"oai-did=([0-9a-fA-F-]{20,})", str(resp.text or ""))
-            if did_m:
-                did = did_m.group(1)
-        if not did:
-            did = str(uuid.uuid4())
-            relay_cookie_jar["oai-did"] = did
-            try:
-                s.cookies.set("oai-did", did)
-            except Exception:
-                pass
-            emitter.warn(f"未从响应提取到 oai-did，已使用临时 Device ID: {did}", step="oauth_init")
-        else:
-            emitter.info(f"Device ID: {did}", step="oauth_init")
+        did = _extract_or_create_device_id(resp, "oauth_init")
 
         if _stopped():
             return None
 
         # ------- 步骤4：获取 Sentinel Token -------
-        emitter.info("正在获取 Sentinel Token...", step="sentinel")
-        signup_body = f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"signup"}}'
-        sen_req_body = f'{{"p":"","id":"{did}","flow":"authorize_continue"}}'
-
-        sen_resp = _raw_post(
-            "https://sentinel.openai.com/backend-api/sentinel/req",
-            headers={
-                "origin": "https://sentinel.openai.com",
-                "referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
-                "content-type": "text/plain;charset=UTF-8",
-            },
-            data=sen_req_body,
-        )
-
-        if sen_resp.status_code != 200:
-            emitter.error(f"Sentinel 异常拦截，状态码: {sen_resp.status_code}", step="sentinel")
+        sentinel = _fetch_sentinel(did, "authorize_continue", "sentinel")
+        if not sentinel:
             return None
-
-        sen_token = sen_resp.json()["token"]
-        sentinel = f'{{"p": "", "t": "", "c": "{sen_token}", "id": "{did}", "flow": "authorize_continue"}}'
-        emitter.success("Sentinel Token 获取成功", step="sentinel")
 
         if _stopped():
             return None
 
         # ------- 步骤5：提交注册 -------
-        emitter.info("正在提交注册表单...", step="signup")
+        emitter.info("正在提交注册邮箱...", step="signup")
         signup_resp = _session_post(
             "https://auth.openai.com/api/accounts/authorize/continue",
             headers={
@@ -1366,59 +1513,51 @@ def run(
                 "content-type": "application/json",
                 "openai-sentinel-token": sentinel,
             },
-            data=signup_body,
+            json={"username": {"value": email, "kind": "email"}, "screen_hint": "signup"},
         )
-        emitter.info(f"注册表单提交状态: {signup_resp.status_code}", step="signup")
-        if signup_resp.status_code == 409:
-            emitter.warn(f"signup 409 响应: {str(signup_resp.text or '')[:220]}", step="signup")
+        emitter.info(f"注册邮箱提交状态: {signup_resp.status_code}", step="signup")
+        if signup_resp.status_code != 200:
+            emitter.error(str(signup_resp.text or "")[:240], step="signup")
+            return None
 
-        # ------- 步骤6：发送 OTP 验证码 -------
-        emitter.info("正在发送邮箱验证码...", step="send_otp")
-        otp_resp = _session_post(
-            "https://auth.openai.com/api/accounts/passwordless/send-otp",
+        # ------- 步骤6：设置账号密码并发送 OTP -------
+        emitter.info("正在设置账号密码...", step="signup")
+        register_resp = _session_post(
+            "https://auth.openai.com/api/accounts/user/register",
             headers={
                 "referer": "https://auth.openai.com/create-account/password",
+                "origin": "https://auth.openai.com",
                 "accept": "application/json",
                 "content-type": "application/json",
             },
+            json={"username": email, "password": account_password},
+        )
+        emitter.info(f"账号密码设置状态: {register_resp.status_code}", step="signup")
+        if register_resp.status_code != 200:
+            emitter.error(str(register_resp.text or "")[:240], step="signup")
+            return None
+
+        emitter.info("正在发送邮箱验证码...", step="send_otp")
+        otp_resp = _session_get(
+            "https://auth.openai.com/api/accounts/email-otp/send",
+            headers={
+                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "referer": "https://auth.openai.com/create-account/password",
+                "upgrade-insecure-requests": "1",
+            },
+            allow_redirects=True,
         )
         emitter.info(f"验证码发送状态: {otp_resp.status_code}", step="send_otp")
-        if otp_resp.status_code == 409:
-            emitter.warn(f"send_otp 409 响应: {str(otp_resp.text or '')[:220]}", step="send_otp")
 
         if otp_resp.status_code != 200:
-            emitter.error(f"验证码发送失败（状态码 {otp_resp.status_code}），跳过本轮", step="send_otp")
+            emitter.error(f"验证码发送失败（状态码 {otp_resp.status_code}）", step="send_otp")
             return None
 
         if _stopped():
             return None
 
         # ------- 步骤7：轮询邮箱拿验证码 -------
-        if mail_provider is not None:
-            try:
-                code = mail_provider.wait_for_otp(
-                    dev_token,
-                    email,
-                    proxy=static_proxy,
-                    proxy_selector=mail_proxy_selector,
-                    stop_event=stop_event,
-                )
-            except TypeError:
-                code = mail_provider.wait_for_otp(
-                    dev_token,
-                    email,
-                    proxy=static_proxy,
-                    stop_event=stop_event,
-                )
-        else:
-            code = get_oai_code(
-                dev_token,
-                email,
-                static_proxies,
-                emitter,
-                stop_event,
-                proxy_selector=mail_proxies_selector,
-            )
+        code = _wait_for_openai_otp()
         if not code:
             return None
 
@@ -1427,7 +1566,6 @@ def run(
 
         # ------- 步骤8：提交验证码 -------
         emitter.info("正在验证 OTP...", step="verify_otp")
-        code_body = f'{{"code":"{code}"}}'
         code_resp = _session_post(
             "https://auth.openai.com/api/accounts/email-otp/validate",
             headers={
@@ -1435,16 +1573,45 @@ def run(
                 "accept": "application/json",
                 "content-type": "application/json",
             },
-            data=code_body,
+            json={"code": code},
         )
         emitter.info(f"验证码校验状态: {code_resp.status_code}", step="verify_otp")
+        if code_resp.status_code != 200:
+            emitter.warn("首次 OTP 校验失败，尝试重新发送验证码", step="verify_otp")
+            otp_retry_resp = _session_get(
+                "https://auth.openai.com/api/accounts/email-otp/send",
+                headers={
+                    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "referer": "https://auth.openai.com/create-account/password",
+                    "upgrade-insecure-requests": "1",
+                },
+                allow_redirects=True,
+            )
+            if otp_retry_resp.status_code != 200:
+                emitter.error(str(code_resp.text or "")[:240], step="verify_otp")
+                return None
+            code = _wait_for_openai_otp(timeout=60)
+            if not code:
+                return None
+            code_resp = _session_post(
+                "https://auth.openai.com/api/accounts/email-otp/validate",
+                headers={
+                    "referer": "https://auth.openai.com/email-verification",
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                },
+                json={"code": code},
+            )
+            emitter.info(f"验证码重试校验状态: {code_resp.status_code}", step="verify_otp")
+            if code_resp.status_code != 200:
+                emitter.error(str(code_resp.text or "")[:240], step="verify_otp")
+                return None
 
         if _stopped():
             return None
 
         # ------- 步骤9：创建账户 -------
         emitter.info("正在创建账户信息...", step="create_account")
-        create_account_body = '{"name":"Neo","birthdate":"2000-02-20"}'
         create_account_resp = _session_post(
             "https://auth.openai.com/api/accounts/create_account",
             headers={
@@ -1452,7 +1619,7 @@ def run(
                 "accept": "application/json",
                 "content-type": "application/json",
             },
-            data=create_account_body,
+            json={"name": "Neo", "birthdate": "2000-02-20"},
         )
         create_account_status = create_account_resp.status_code
         emitter.info(f"账户创建状态: {create_account_status}", step="create_account")
@@ -1462,6 +1629,141 @@ def run(
             return None
 
         emitter.success("账户创建成功！", step="create_account")
+        try:
+            create_account_data = create_account_resp.json() or {}
+        except Exception:
+            create_account_data = {}
+        signup_continue_url = str(
+            create_account_data.get("continue_url")
+            or create_account_data.get("url")
+            or create_account_data.get("redirect_url")
+            or ""
+        ).strip()
+        if signup_continue_url:
+            try:
+                _session_get(signup_continue_url, allow_redirects=True, timeout=15)
+            except Exception:
+                pass
+
+        if _stopped():
+            return None
+
+        emitter.info("注册完成，正在使用邮箱密码单独登录获取 Token...", step="oauth_login")
+        _reset_auth_session()
+
+        oauth = generate_oauth_url()
+        oauth_init_resp = _session_get(oauth.auth_url, timeout=20)
+        emitter.info(f"独立 OAuth 初始化状态: {oauth_init_resp.status_code}", step="oauth_login")
+        if oauth_init_resp.status_code >= 400:
+            emitter.error(f"独立 OAuth 初始化失败，状态码: {oauth_init_resp.status_code}", step="oauth_login")
+            return None
+        login_did = _extract_or_create_device_id(oauth_init_resp, "oauth_login")
+
+        if _stopped():
+            return None
+
+        login_sentinel = _fetch_sentinel(login_did, "authorize_continue", "oauth_login")
+        if not login_sentinel:
+            return None
+
+        emitter.info("正在提交登录邮箱...", step="oauth_login")
+        login_continue_resp = _session_post(
+            "https://auth.openai.com/api/accounts/authorize/continue",
+            headers={
+                "referer": str(oauth_init_resp.url or "https://auth.openai.com/log-in"),
+                "accept": "application/json",
+                "content-type": "application/json",
+                "openai-sentinel-token": login_sentinel,
+            },
+            json={"username": {"value": email, "kind": "email"}},
+        )
+        emitter.info(f"登录邮箱提交状态: {login_continue_resp.status_code}", step="oauth_login")
+        if login_continue_resp.status_code != 200:
+            emitter.error(str(login_continue_resp.text or "")[:240], step="oauth_login")
+            return None
+        try:
+            continue_data = login_continue_resp.json() or {}
+        except Exception:
+            emitter.error("登录邮箱响应解析失败", step="oauth_login")
+            return None
+        continue_url = str(continue_data.get("continue_url") or "").strip()
+        page_type = str(((continue_data.get("page") or {}).get("type") or "")).strip()
+
+        if _stopped():
+            return None
+
+        password_sentinel = _fetch_sentinel(login_did, "password_verify", "oauth_login")
+        if not password_sentinel:
+            return None
+
+        emitter.info("正在提交账号密码登录...", step="oauth_login")
+        password_resp = _session_post(
+            "https://auth.openai.com/api/accounts/password/verify",
+            headers={
+                "referer": "https://auth.openai.com/log-in/password",
+                "origin": "https://auth.openai.com",
+                "accept": "application/json",
+                "content-type": "application/json",
+                "openai-sentinel-token": password_sentinel,
+            },
+            json={"password": account_password},
+        )
+        emitter.info(f"账号密码校验状态: {password_resp.status_code}", step="oauth_login")
+        if password_resp.status_code != 200:
+            emitter.error(str(password_resp.text or "")[:240], step="oauth_login")
+            return None
+        try:
+            password_data = password_resp.json() or {}
+        except Exception:
+            emitter.error("密码校验响应解析失败", step="oauth_login")
+            return None
+        continue_url = str(password_data.get("continue_url") or continue_url).strip()
+        page_type = str(((password_data.get("page") or {}).get("type") or page_type)).strip()
+
+        need_oauth_otp = (
+            page_type == "email_otp_verification"
+            or "email-verification" in continue_url
+            or "email-otp" in continue_url
+        )
+        if need_oauth_otp:
+            emitter.info("登录阶段需要邮箱 OTP，正在等待验证码...", step="oauth_login")
+            otp_validated = False
+            for attempt in range(2):
+                if _stopped():
+                    return None
+                oauth_code = _wait_for_openai_otp(timeout=(120 if attempt == 0 else 60))
+                if not oauth_code:
+                    return None
+                oauth_otp_resp = _session_post(
+                    "https://auth.openai.com/api/accounts/email-otp/validate",
+                    headers={
+                        "referer": "https://auth.openai.com/email-verification",
+                        "origin": "https://auth.openai.com",
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                    },
+                    json={"code": oauth_code},
+                )
+                emitter.info(f"登录阶段 OTP 校验状态: {oauth_otp_resp.status_code}", step="oauth_login")
+                if oauth_otp_resp.status_code == 200:
+                    try:
+                        oauth_otp_data = oauth_otp_resp.json() or {}
+                    except Exception:
+                        oauth_otp_data = {}
+                    continue_url = str(oauth_otp_data.get("continue_url") or continue_url).strip()
+                    page_type = str(((oauth_otp_data.get("page") or {}).get("type") or page_type)).strip()
+                    otp_validated = True
+                    break
+                emitter.warn(f"登录阶段 OTP 校验失败，第 {attempt + 1} 次尝试未通过", step="oauth_login")
+                time.sleep(2)
+            if not otp_validated:
+                emitter.error("登录阶段 OTP 校验失败", step="oauth_login")
+                return None
+
+        if _stopped():
+            return None
+
+        return _complete_workspace_and_exchange(oauth, continue_url)
 
         if _stopped():
             return None
