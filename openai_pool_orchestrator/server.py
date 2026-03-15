@@ -2546,6 +2546,21 @@ async def api_get_pool_config() -> Dict[str, Any]:
 @app.post("/api/pool/config")
 async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
     global _sync_config
+    old_auto = bool(_sync_config.get("auto_maintain", False))
+    old_base = str(_sync_config.get("cpa_base_url", "")).strip()
+    old_token = str(_sync_config.get("cpa_token", "")).strip()
+    try:
+        old_min = int(_sync_config.get("min_candidates", 800) or 0)
+    except (TypeError, ValueError):
+        old_min = 0
+    try:
+        old_used = int(_sync_config.get("used_percent_threshold", 95) or 0)
+    except (TypeError, ValueError):
+        old_used = 0
+    try:
+        old_interval = int(_sync_config.get("maintain_interval_minutes", 30) or 30)
+    except (TypeError, ValueError):
+        old_interval = 30
     _sync_config["cpa_base_url"] = req.cpa_base_url.strip()
     if req.clear_cpa_token:
         _sync_config["cpa_token"] = ""
@@ -2562,6 +2577,32 @@ async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
         _start_auto_maintain()
     else:
         _stop_auto_maintain()
+
+    if req.auto_maintain and old_auto:
+        new_base = str(_sync_config.get("cpa_base_url", "")).strip()
+        new_token = str(_sync_config.get("cpa_token", "")).strip()
+        try:
+            new_min = int(_sync_config.get("min_candidates", 800) or 0)
+        except (TypeError, ValueError):
+            new_min = 0
+        try:
+            new_used = int(_sync_config.get("used_percent_threshold", 95) or 0)
+        except (TypeError, ValueError):
+            new_used = 0
+        try:
+            new_interval = int(_sync_config.get("maintain_interval_minutes", 30) or 30)
+        except (TypeError, ValueError):
+            new_interval = 30
+
+        config_changed = (
+            old_base != new_base
+            or old_token != new_token
+            or old_min != new_min
+            or old_used != new_used
+            or old_interval != new_interval
+        )
+        if config_changed:
+            threading.Thread(target=_try_auto_register, daemon=True).start()
 
     return {"status": "saved"}
 
