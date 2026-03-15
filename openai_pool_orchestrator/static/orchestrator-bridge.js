@@ -765,6 +765,7 @@
     const provider = readText('opaProxyPoolProvider') || 'zenproxy_api';
     const apiUrlEl = qs('opaProxyPoolApiUrl');
     const authModeEl = qs('opaProxyPoolAuthMode');
+    const apiKeyEl = qs('opaProxyPoolApiKey');
     if (!apiUrlEl || !authModeEl) return;
 
     const defaultUrl = proxyPoolDefaultUrl(provider);
@@ -777,6 +778,13 @@
     authModeEl.disabled = fixedProxyProvider;
     if (fixedProxyProvider) {
       authModeEl.value = 'query';
+    }
+    if (apiKeyEl) {
+      apiKeyEl.disabled = fixedProxyProvider;
+      const field = apiKeyEl.closest('.opa-bridge-field');
+      if (field) {
+        field.style.display = fixedProxyProvider ? 'none' : '';
+      }
     }
   }
 

@@ -318,7 +318,9 @@ def _fetch_proxy_from_pool(pool_cfg: Dict[str, Any]) -> str:
     auth_mode = str(pool_cfg.get("auth_mode") or DEFAULT_PROXY_POOL_AUTH_MODE).strip().lower()
     if auth_mode not in ("header", "query"):
         auth_mode = DEFAULT_PROXY_POOL_AUTH_MODE
-    api_key = str(pool_cfg.get("api_key") or DEFAULT_PROXY_POOL_API_KEY).strip() or DEFAULT_PROXY_POOL_API_KEY
+    api_key = str(pool_cfg.get("api_key") or "").strip()
+    if not api_key and provider == "zenproxy_api":
+        api_key = DEFAULT_PROXY_POOL_API_KEY
     relay_host = str(pool_cfg.get("relay_host") or "").strip()
     if not relay_host:
         relay_host = _pool_host_from_api_url(api_url)
@@ -333,10 +335,11 @@ def _fetch_proxy_from_pool(pool_cfg: Dict[str, Any]) -> str:
 
     headers: Dict[str, str] = {}
     params: Dict[str, str] = {"count": str(count), "country": country}
-    if auth_mode == "query":
-        params["api_key"] = api_key
-    else:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if api_key:
+        if auth_mode == "query":
+            params["api_key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
 
     resp = _call_with_http_fallback(
         requests.get,
@@ -849,13 +852,16 @@ def run(
     pool_cfg_raw = proxy_pool_config or {}
     pool_provider = _normalize_pool_provider(pool_cfg_raw.get("provider"))
     pool_default_endpoint = _default_pool_endpoint(pool_provider)
+    pool_api_key = str(pool_cfg_raw.get("api_key") or "").strip()
+    if not pool_api_key and pool_provider == "zenproxy_api":
+        pool_api_key = DEFAULT_PROXY_POOL_API_KEY
     pool_cfg = {
         "enabled": bool(pool_cfg_raw.get("enabled", False)),
         "provider": pool_provider,
         "api_url": str(pool_cfg_raw.get("api_url") or pool_default_endpoint).strip() or pool_default_endpoint,
         "fixed_proxy": str(pool_cfg_raw.get("fixed_proxy") or "").strip(),
         "auth_mode": str(pool_cfg_raw.get("auth_mode") or DEFAULT_PROXY_POOL_AUTH_MODE).strip().lower() or DEFAULT_PROXY_POOL_AUTH_MODE,
-        "api_key": str(pool_cfg_raw.get("api_key") or DEFAULT_PROXY_POOL_API_KEY).strip() or DEFAULT_PROXY_POOL_API_KEY,
+        "api_key": pool_api_key,
         "count": pool_cfg_raw.get("count", DEFAULT_PROXY_POOL_COUNT),
         "country": str(pool_cfg_raw.get("country") or DEFAULT_PROXY_POOL_COUNTRY).strip().upper() or DEFAULT_PROXY_POOL_COUNTRY,
         "timeout_seconds": int(pool_cfg_raw.get("timeout_seconds") or 10),

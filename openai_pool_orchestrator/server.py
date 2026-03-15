@@ -34,6 +34,7 @@ from .mail_providers import create_provider, MultiMailRouter
 from .pool_maintainer import PoolMaintainer, Sub2ApiMaintainer
 
 DEFAULT_PROXY_POOL_PROVIDER = "zenproxy_api"
+DEFAULT_PROXY_POOL_API_KEY = "19c0ec43-8f76-4c97-81bc-bcda059eeba4"
 PROXY_POOL_PROVIDER_CHOICES = {
     "zenproxy_api": "zenproxy_api",
     "zenproxy": "zenproxy_api",
@@ -91,7 +92,7 @@ def _load_sync_config() -> Dict[str, str]:
         "proxy_pool_provider": "zenproxy_api",
         "proxy_pool_api_url": "https://zenproxy.top/api/fetch",
         "proxy_pool_auth_mode": "query",
-        "proxy_pool_api_key": "19c0ec43-8f76-4c97-81bc-bcda059eeba4",
+        "proxy_pool_api_key": DEFAULT_PROXY_POOL_API_KEY,
         "proxy_pool_count": 1,
         "proxy_pool_country": "US",
         "desired_token_count": 0,
@@ -110,6 +111,10 @@ def _normalize_proxy_pool_provider(value: Any) -> str:
 
 def _default_proxy_pool_api_url(provider: str) -> str:
     return PROXY_POOL_PROVIDER_DEFAULT_URLS.get(provider, PROXY_POOL_PROVIDER_DEFAULT_URLS[DEFAULT_PROXY_POOL_PROVIDER])
+
+
+def _is_fixed_proxy_pool_provider(provider: str) -> bool:
+    return provider in ("dreamy_socks5_pool", "docker_warp_socks")
 
 
 def _normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -157,11 +162,20 @@ def _normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     proxy_pool_default_url = _default_proxy_pool_api_url(proxy_pool_provider)
     proxy_pool_api_url = str(cfg.get("proxy_pool_api_url", proxy_pool_default_url) or "").strip()
     cfg["proxy_pool_api_url"] = proxy_pool_api_url or proxy_pool_default_url
+    fixed_proxy_provider = _is_fixed_proxy_pool_provider(proxy_pool_provider)
     proxy_pool_auth_mode = str(cfg.get("proxy_pool_auth_mode", "query") or "").strip().lower()
     if proxy_pool_auth_mode not in ("header", "query"):
         proxy_pool_auth_mode = "query"
+    if fixed_proxy_provider:
+        proxy_pool_auth_mode = "query"
     cfg["proxy_pool_auth_mode"] = proxy_pool_auth_mode
-    cfg["proxy_pool_api_key"] = str(cfg.get("proxy_pool_api_key", "19c0ec43-8f76-4c97-81bc-bcda059eeba4") or "").strip()
+    if fixed_proxy_provider:
+        cfg["proxy_pool_api_key"] = ""
+    else:
+        proxy_pool_api_key = str(cfg.get("proxy_pool_api_key", "") or "").strip()
+        if not proxy_pool_api_key and proxy_pool_provider == "zenproxy_api":
+            proxy_pool_api_key = DEFAULT_PROXY_POOL_API_KEY
+        cfg["proxy_pool_api_key"] = proxy_pool_api_key
     try:
         cfg["proxy_pool_count"] = max(1, min(int(cfg.get("proxy_pool_count", 1)), 20))
     except (TypeError, ValueError):
@@ -1277,13 +1291,19 @@ async def api_stop() -> Dict[str, str]:
 @app.post("/api/proxy/save")
 async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
     local_related_changed = False
+    desired_changed = False
+    auto_register_changed = False
 
     if req.proxy is not None:
         _sync_config["proxy"] = req.proxy.strip()
     if req.auto_register is not None:
-        _sync_config["auto_register"] = bool(req.auto_register)
+        new_val = bool(req.auto_register)
+        auto_register_changed = new_val != bool(_sync_config.get("auto_register", False))
+        _sync_config["auto_register"] = new_val
     if req.desired_token_count is not None:
-        _sync_config["desired_token_count"] = max(0, int(req.desired_token_count))
+        new_val = max(0, int(req.desired_token_count))
+        desired_changed = new_val != int(_sync_config.get("desired_token_count", 0) or 0)
+        _sync_config["desired_token_count"] = new_val
     if req.multithread is not None:
         _sync_config["multithread"] = bool(req.multithread)
     if req.thread_count is not None:
@@ -1304,6 +1324,8 @@ async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
         _stop_local_auto_maintain()
         if _sync_config.get("local_auto_maintain"):
             _start_local_auto_maintain()
+    if (desired_changed or auto_register_changed) and _sync_config.get("local_auto_maintain"):
+        _try_local_auto_register()
     return {"status": "saved"}
 
 
@@ -1490,8 +1512,11 @@ async def api_get_proxy_pool_config() -> Dict[str, Any]:
 @app.post("/api/proxy-pool/config")
 async def api_set_proxy_pool_config(req: ProxyPoolConfigRequest) -> Dict[str, Any]:
     provider = _normalize_proxy_pool_provider(req.proxy_pool_provider)
+    fixed_provider = _is_fixed_proxy_pool_provider(provider)
     proxy_pool_auth_mode = str(req.proxy_pool_auth_mode or "query").strip().lower()
     if proxy_pool_auth_mode not in ("header", "query"):
+        proxy_pool_auth_mode = "query"
+    if fixed_provider:
         proxy_pool_auth_mode = "query"
 
     default_url = _default_proxy_pool_api_url(provider)
@@ -1504,6 +1529,10 @@ async def api_set_proxy_pool_config(req: ProxyPoolConfigRequest) -> Dict[str, An
         proxy_pool_api_key = ""
     elif not proxy_pool_api_key:
         proxy_pool_api_key = str(_sync_config.get("proxy_pool_api_key", "") or "").strip()
+    if fixed_provider:
+        proxy_pool_api_key = ""
+    elif not proxy_pool_api_key and provider == "zenproxy_api":
+        proxy_pool_api_key = DEFAULT_PROXY_POOL_API_KEY
 
     try:
         proxy_pool_count = max(1, min(int(req.proxy_pool_count), 20))
