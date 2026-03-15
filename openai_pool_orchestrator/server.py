@@ -395,6 +395,8 @@ BRIDGE_PUBLIC_API_PATHS = {
     "/api/check-proxy",
     "/api/proxy",
     "/api/proxy/save",
+    "/api/proxy-pool/config",
+    "/api/proxy-pool/test",
     "/api/local/maintain",
     "/api/pool/config",
     "/api/pool/check",
