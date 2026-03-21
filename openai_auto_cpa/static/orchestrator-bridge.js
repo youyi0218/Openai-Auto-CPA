@@ -880,6 +880,29 @@
     }
   }
 
+  async function syncCpaMinCandidates(target) {
+    const desired = Math.max(1, num(target, 0));
+    const cfg = await api('/api/pool/config');
+    const current = num(cfg.min_candidates, 0);
+    if (current === desired) return { updated: false, desired, current };
+
+    await api('/api/pool/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cpa_base_url: String(cfg.cpa_base_url || '').trim(),
+        cpa_token: '',
+        clear_cpa_token: false,
+        min_candidates: desired,
+        used_percent_threshold: Math.max(1, Math.min(100, num(cfg.used_percent_threshold, 95))),
+        auto_maintain: !!cfg.auto_maintain,
+        maintain_interval_minutes: Math.max(5, num(cfg.maintain_interval_minutes, 30))
+      })
+    });
+
+    return { updated: true, desired, current };
+  }
+
   async function refreshStatus() {
     try {
       const d = await api('/api/status');
@@ -1300,17 +1323,25 @@
     onClick('opaSaveRegister', async () => {
       logSection('register', '正在保存自动注册配置...');
       try {
+        const desired = Math.max(0, num(qs('opaDesired').value, 0));
         await api('/api/proxy/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             proxy: (qs('opaProxy').value || '').trim(),
             auto_register: !!qs('opaAutoRegister').checked,
-            desired_token_count: Math.max(0, num(qs('opaDesired').value, 0)),
+            desired_token_count: desired,
             multithread: !!qs('opaMultithread').checked,
             thread_count: Math.max(1, Math.min(10, num(qs('opaThreads').value, 3)))
           })
         });
+        if (desired > 0) {
+          const syncResult = await syncCpaMinCandidates(desired);
+          if (syncResult && syncResult.updated) {
+            qs('opaCpaMin').value = syncResult.desired;
+            logSection('register', '已同步 CPA 目标阈值: ' + syncResult.current + ' -> ' + syncResult.desired);
+          }
+        }
         logSection('register', '自动注册配置已保存');
       } catch (e) {
         logSection('register', '保存失败: ' + e.message, 'error');

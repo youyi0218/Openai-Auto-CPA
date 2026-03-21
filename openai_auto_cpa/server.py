@@ -1,6 +1,6 @@
 """
-FastAPI 朔
-峁?REST API + SSE 实时志
+FastAPI 服务
+提供 REST API 与 SSE 实时日志
 """
 
 import asyncio
@@ -273,7 +273,7 @@ def _generate_api_key() -> str:
 
 def _push_refresh_token(base_url: str, bearer: str, refresh_token: str) -> Dict[str, Any]:
     """
-     Sub2Api 平台 API 峤?refresh_token
+     调用 Sub2Api 平台 API 上传 refresh_token
      {ok: bool, status: int, body: str}
     """
     url = base_url.rstrip("/") + "/api/v1/admin/openai/refresh-token"
@@ -447,10 +447,10 @@ class TaskState:
         self.thread: Optional[threading.Thread] = None
         self._worker_threads: Dict[int, threading.Thread] = {}
         self._task_lock = threading.RLock()
-        # 志悴バsyncio
+        # SSE 队列（桥接到 asyncio）
         self._sse_queues: list[asyncio.Queue] = []
         self._sse_lock = threading.Lock()
-        # 统疲募史
+        # 累计统计
         _s = _load_state()
         self.success_count: int = _s.get("success", 0)
         self.fail_count: int = _s.get("fail", 0)
@@ -460,7 +460,7 @@ class TaskState:
         self.upload_mode: str = "snapshot"
         self.target_count: int = 0
         self.task_source: str = "manual"
-        # 前诩史奂 success/fail 耄?
+        # 当前轮次 success/fail 统计
         self.run_success_count: int = 0
         self.run_fail_count: int = 0
         self.platform_success_count: Dict[str, int] = {name: 0 for name in UPLOAD_PLATFORMS}
@@ -559,7 +559,7 @@ class TaskState:
 
         emitter = self._make_emitter()
         emitter.info(
-            f"洗: {'胁平台CPASub2Api' if upload_mode == 'snapshot' else '双平台同撕双洗'}",
+            f"上传模式: {'快照模式（CPA/Sub2Api）' if upload_mode == 'snapshot' else '双平台解耦上传'}",
             step="mode",
         )
 
@@ -667,16 +667,16 @@ class TaskState:
             base_url = cfg.get("base_url", "").strip()
             bearer = cfg.get("bearer_token", "").strip()
             if not base_url or not bearer:
-                em.error("远同缺平台址 Token缺", step="sync")
+                em.error("远程同步缺少平台地址或 Bearer Token", step="sync")
                 return False
 
-            em.info(f"远同 {email}...", step="sync")
+            em.info(f"远程同步 {email}...", step="sync")
             fpath = os.path.join(TOKENS_DIR, file_name)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     token_data = json.load(f)
             except Exception as e:
-                em.error(f"远同斐? 取 Token 失: {e}", step="sync")
+                em.error(f"远程同步前读取 Token 失败: {e}", step="sync")
                 return False
 
             last_status = 0
@@ -688,8 +688,8 @@ class TaskState:
                     last_body = str(result.get("body") or "")
                     if result.get("ok"):
                         if not _mark_token_uploaded_platform(fpath, "sub2api"):
-                            em.warn(f"远同晒乇失: {email}", step="sync")
-                        em.success(f"远同晒: {email}", step="sync")
+                            em.warn(f"远程同步成功但本地标记失败: {email}", step="sync")
+                        em.success(f"远程同步成功: {email}", step="sync")
                         return True
                 except Exception as e:
                     last_status = 0
@@ -697,7 +697,7 @@ class TaskState:
                 if attempt < 2:
                     time.sleep(2 ** attempt)
 
-            em.error(f"远同失({last_status}): {last_body[:120]}", step="sync")
+            em.error(f"远程同步失败({last_status}): {last_body[:120]}", step="sync")
             return False
 
         def _upload_to_cpa(file_name: str, file_path: str, token_json: str, email: str, prefix: str) -> bool:
@@ -726,7 +726,7 @@ class TaskState:
             if not auto_sync_enabled:
                 return True
             if not refresh_token:
-                emitter.error(f"{prefix}缺 refresh_token薹远同: {email}", step="sync")
+                emitter.error(f"{prefix}缺少 refresh_token，无法远程同步: {email}", step="sync")
                 return False
             return _auto_sync(file_name, email, emitter)
 
@@ -761,15 +761,13 @@ class TaskState:
                 _apply_final_result(email, prefix, final_ok)
                 return
             if no_required_platforms:
-                # 木螅注岵挥ι?
                 if _decoupled_slots_exhausted():
                     emitter.info(
-                        f"{prefix}平台目悖匆财成? {email}",
+                        f"{prefix}平台目标已满足，停止继续注册: {email}",
                         step="auto_stop",
                     )
                     self.stop_event.set()
                     return
-                # 侄洗平台/畛∽⑸刮?
                 _apply_final_result(email, prefix, True)
 
         def _complete_decoupled_platform(token_key: str, platform: str, ok: bool) -> None:
@@ -807,7 +805,7 @@ class TaskState:
                 q.put_nowait(job)
                 _refresh_backlog()
             except queue.Full:
-                emitter.error(f"{prefix}{platform.upper()} 洗: {job.get('email', 'unknown')}", step="sync")
+                emitter.error(f"{prefix}{platform.upper()} 上传队列已满: {job.get('email', 'unknown')}", step="sync")
                 _release_upload_slot(platform)
                 _complete_decoupled_platform(job["token_key"], platform, False)
 
@@ -857,7 +855,7 @@ class TaskState:
                 count += 1
                 provider_name, provider = mail_router.next_provider()
                 emitter.info(
-                    f"{prefix}>>>  {count} 注 (: {provider_name}) <<<",
+                    f"{prefix}>>> 开始第 {count} 次注册（邮箱源: {provider_name}）<<<",
                     step="start",
                 )
                 try:
@@ -877,7 +875,7 @@ class TaskState:
                         },
                     )
 
-                    # 盏停止藕时然却殉晒玫 token狻白⑸刮?未同
+                    # 如果已收到停止信号且本轮未产出 token，则直接退出
                     if self.stop_event.is_set() and not token_json:
                         break
 
@@ -910,21 +908,21 @@ class TaskState:
                             if snapshot_strict_serial:
                                 selected_platform = _reserve_snapshot_serial_platform()
                                 if selected_platform == "cpa":
-                                    emitter.info(f"{prefix}模式谓洗 CPA -> {email}", step="cpa_upload")
+                                    emitter.info(f"{prefix}快照模式顺序上传 CPA -> {email}", step="cpa_upload")
                                     cpa_ok = _upload_to_cpa(file_name, file_path, token_json, email, prefix) if pool_maintainer else True
                                     _record_platform_result("cpa", cpa_ok)
                                     if not cpa_ok:
                                         _release_upload_slot("cpa")
                                     _apply_final_result(email, prefix, cpa_ok)
                                 elif selected_platform == "sub2api":
-                                    emitter.info(f"{prefix}模式谓洗 Sub2Api -> {email}", step="sync")
+                                    emitter.info(f"{prefix}快照模式顺序上传 Sub2Api -> {email}", step="sync")
                                     sub2api_ok = _upload_to_sub2api(file_name, email, refresh_token, prefix) if auto_sync_enabled else True
                                     _record_platform_result("sub2api", sub2api_ok)
                                     if not sub2api_ok:
                                         _release_upload_slot("sub2api")
                                     _apply_final_result(email, prefix, sub2api_ok)
                                 else:
-                                    emitter.info(f"{prefix}模式目悖Ｖ瓜? {email}", step="auto_stop")
+                                    emitter.info(f"{prefix}快照模式目标已满足，停止继续注册: {email}", step="auto_stop")
                                     self.stop_event.set()
                             else:
                                 cpa_ok = True
@@ -944,7 +942,7 @@ class TaskState:
                                 if auto_sync_enabled:
                                     sub2api_required = _reserve_upload_slot("sub2api")
                                 if auto_sync_enabled and not sub2api_required:
-                                    emitter.info(f"{prefix}Sub2Api 汛目值同: {email}", step="sync")
+                                    emitter.info(f"{prefix}Sub2Api 目标已满足，跳过上传: {email}", step="sync")
                                 if auto_sync_enabled and sub2api_required:
                                     sub2api_ok = _upload_to_sub2api(file_name, email, refresh_token, prefix)
                                     _record_platform_result("sub2api", sub2api_ok)
@@ -960,7 +958,7 @@ class TaskState:
                                 if _reserve_upload_slot("cpa"):
                                     required_platforms.add("cpa")
                                 else:
-                                    emitter.info(f"{prefix}CPA 汛目值洗: {email}", step="cpa_upload")
+                                    emitter.info(f"{prefix}CPA 目标已满足，跳过上传: {email}", step="cpa_upload")
 
                             if auto_sync_enabled:
                                 if _reserve_upload_slot("sub2api"):
@@ -969,9 +967,9 @@ class TaskState:
                                     else:
                                         failed_platforms.add("sub2api")
                                         _release_upload_slot("sub2api")
-                                        emitter.error(f"{prefix}缺 refresh_token薹远同: {email}", step="sync")
+                                        emitter.error(f"{prefix}缺少 refresh_token，无法远程同步: {email}", step="sync")
                                 else:
-                                    emitter.info(f"{prefix}Sub2Api 汛目值同: {email}", step="sync")
+                                    emitter.info(f"{prefix}Sub2Api 目标已满足，跳过上传: {email}", step="sync")
 
                             token_key = file_name
                             _register_decoupled_token(token_key, email, prefix, required_platforms, failed_platforms)
@@ -1003,7 +1001,7 @@ class TaskState:
                         self.fail_count += 1
                         self.run_fail_count += 1
                         _save_state(self.success_count, self.fail_count)
-                    emitter.error(f"{prefix}未斐? {e}", step="runtime")
+                    emitter.error(f"{prefix}运行异常: {e}", step="runtime")
 
                 if self.stop_event.is_set():
                     break
@@ -1221,7 +1219,7 @@ async def api_auth_status() -> Dict[str, Any]:
 @app.post("/api/auth/config")
 async def api_set_auth_config(req: ApiAuthConfigRequest) -> Dict[str, Any]:
     if _env_api_key():
-        raise HTTPException(status_code=409, detail="X_API_KEY 鐜鍙橀噺宸茬敓鏁堬紝涓嶈兘閫氳繃椤甸潰淇敼")
+        raise HTTPException(status_code=409, detail="环境变量 X_API_KEY 已生效，无法通过页面修改")
 
     enabled = bool(req.enabled)
     new_key = str(req.api_key or "").strip()
@@ -1233,7 +1231,7 @@ async def api_set_auth_config(req: ApiAuthConfigRequest) -> Dict[str, Any]:
         new_key = _generate_api_key()
 
     if enabled and not new_key and not current:
-        raise HTTPException(status_code=400, detail="鍚敤閴存潈鍓嶈濉啓 API Key")
+        raise HTTPException(status_code=400, detail="启用鉴权前请填写 API Key")
 
     if new_key:
         _sync_config["x_api_key"] = new_key
@@ -1241,7 +1239,7 @@ async def api_set_auth_config(req: ApiAuthConfigRequest) -> Dict[str, Any]:
         _sync_config["x_api_key"] = current
 
     if enabled and not _configured_api_key():
-        raise HTTPException(status_code=400, detail="鍚敤閴存潈鍓嶈濉啓 API Key")
+        raise HTTPException(status_code=400, detail="启用鉴权前请填写 API Key")
 
     _sync_config["api_auth_enabled"] = enabled
     _save_sync_config(_sync_config)
@@ -1275,7 +1273,7 @@ def _render_management_html() -> HTMLResponse:
             bridge_js = '    <script src="/static/orchestrator-bridge.js"></script>'
             html = html.replace("</body>", f"{bridge_js}\n  </body>", 1) if "</body>" in html else f"{html}\n{bridge_js}\n"
         return HTMLResponse(content=html)
-    return HTMLResponse("<h1>前募未业</h1>", status_code=404)
+    return HTMLResponse("<h1>前端页面未找到</h1>", status_code=404)
 
 
 @app.post("/api/start")
@@ -1290,7 +1288,7 @@ async def api_start(req: StartRequest) -> Dict[str, Any]:
 @app.post("/api/stop")
 async def api_stop() -> Dict[str, str]:
     if _state.status == "idle":
-        raise HTTPException(status_code=409, detail="没械")
+        raise HTTPException(status_code=409, detail="当前没有运行中的任务")
     _state.stop_task()
     return {"status": "stopping"}
 
@@ -1330,6 +1328,8 @@ async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
     _save_sync_config(_sync_config)
     if desired_changed or auto_register_changed:
         running_local_task_synced = _sync_running_local_auto_task()
+    if auto_register_changed:
+        _sync_running_pool_auto_task()
     if local_related_changed:
         _stop_local_auto_maintain()
         if _sync_config.get("local_auto_maintain"):
@@ -1378,8 +1378,8 @@ async def api_tokens() -> Dict[str, Any]:
     tokens = []
     recent_total_tokens = 0
     if os.path.isdir(TOKENS_DIR):
-        # 募械时校注前妫?
-        # 募式: token_email_1234567890.json取一为时
+        # 按文件名中的时间戳倒序排列
+        # 格式: token_email_1234567890.json
         import re
         def _sort_key(f):
             m = re.search(r'_(\d{10,})\.json$', f)
@@ -1582,10 +1582,10 @@ async def api_set_upload_mode(req: UploadModeRequest) -> Dict[str, Any]:
 
 
 def _verify_sub2api_login(base_url: str, email: str, password: str) -> Dict[str, Any]:
-    """通 HTTP API 证 Sub2Api 平台录凭欠确"""
+    """通过 HTTP API 校验 Sub2Api 平台登录凭据"""
     from curl_cffi import requests as cffi_req
 
-    # 远全协椋?https://
+    # 自动补全 https:// 协议头
     url = base_url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
@@ -1605,11 +1605,11 @@ def _verify_sub2api_login(base_url: str, email: str, password: str) -> Dict[str,
                 err_msg = err_body.get("message") or err_body.get("error") or raw_body[:200]
             except json.JSONDecodeError:
                 err_msg = raw_body[:200]
-            return {"ok": False, "error": f"录失(HTTP {resp.status_code}): {err_msg}"}
+            return {"ok": False, "error": f"登录失败(HTTP {resp.status_code}): {err_msg}"}
         try:
             body = json.loads(raw_body)
         except json.JSONDecodeError:
-            return {"ok": False, "error": f"胤 JSON 式: {raw_body[:200]}"}
+            return {"ok": False, "error": f"响应不是有效 JSON: {raw_body[:200]}"}
 
         token = (
             body.get("token")
@@ -1620,12 +1620,12 @@ def _verify_sub2api_login(base_url: str, email: str, password: str) -> Dict[str,
         )
         return {"ok": True, "token": token}
     except Exception as e:
-        return {"ok": False, "error": f"斐? {e}"}
+        return {"ok": False, "error": f"请求异常: {e}"}
 
 
 @app.post("/api/sync-config")
 async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
-    """同茫证录凭荩"""
+    """保存并校验 Sub2Api 同步配置"""
     global _sync_config
     old_auto_register = bool(_sync_config.get("auto_register", False))
     try:
@@ -1639,11 +1639,11 @@ async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
     new_password = req.password.strip() if req.password else _sync_config.get("password", "")
 
     if not new_base_url:
-        raise HTTPException(status_code=400, detail="写平台址")
+        raise HTTPException(status_code=400, detail="请填写平台地址")
     if not new_email or not new_password:
-        raise HTTPException(status_code=400, detail="写")
+        raise HTTPException(status_code=400, detail="请填写账号和密码")
 
-    # 证录凭
+    # 校验登录凭据
     verify = _verify_sub2api_login(new_base_url, new_email, new_password)
     if not verify["ok"]:
         raise HTTPException(status_code=400, detail=verify["error"])
@@ -1683,6 +1683,7 @@ async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
     auto_register_changed = bool(req.auto_register) != old_auto_register
     if desired_changed or auto_register_changed:
         _sync_running_local_auto_task()
+    _sync_running_pool_auto_task()
 
     _stop_sub2api_auto_maintain()
     if req.sub2api_auto_maintain:
@@ -1696,12 +1697,12 @@ async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
 
 @app.post("/api/sync-now")
 async def api_sync_now(req: SyncNowRequest) -> Dict[str, Any]:
-    """侄同 Token 募偷 Sub2Api 平台"""
+    """将本地 Token 立即同步到 Sub2Api 平台"""
     cfg = _sync_config
     base_url = cfg.get("base_url", "").strip()
     bearer   = cfg.get("bearer_token", "").strip()
     if not base_url or not bearer:
-        raise HTTPException(status_code=400, detail=" Sub2Api 平台址 Bearer Token")
+        raise HTTPException(status_code=400, detail="缺少 Sub2Api 平台地址或 Bearer Token")
 
     results = []
     fnames = req.filenames
@@ -1750,13 +1751,13 @@ class Sub2ApiLoginRequest(BaseModel):
 
 @app.post("/api/sub2api-login")
 async def api_sub2api_login(req: Sub2ApiLoginRequest) -> Dict[str, Any]:
-    """撕录 Sub2Api 平台远取 Bearer Token"""
+    """登录 Sub2Api 平台并获取 Bearer Token"""
     global _sync_config
     base_url = req.base_url.strip()
     if not base_url:
-        raise HTTPException(status_code=400, detail="写平台址")
+        raise HTTPException(status_code=400, detail="请填写平台地址")
 
-    # 远全协椋?https://
+    # 自动补全 https:// 协议头
     if not base_url.startswith(("http://", "https://")):
         base_url = "https://" + base_url
 
@@ -1777,7 +1778,7 @@ async def api_sub2api_login(req: Sub2ApiLoginRequest) -> Dict[str, Any]:
             try:
                 body = json.loads(raw_body)
             except json.JSONDecodeError:
-                raise HTTPException(status_code=502, detail=f"胤 JSON 式: {raw_body[:200]}")
+                raise HTTPException(status_code=502, detail=f"响应不是有效 JSON: {raw_body[:200]}")
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", "replace")
         try:
@@ -1785,11 +1786,11 @@ async def api_sub2api_login(req: Sub2ApiLoginRequest) -> Dict[str, Any]:
             err_msg = err_body.get("message") or err_body.get("error") or raw[:200]
         except json.JSONDecodeError:
             err_msg = raw[:200]
-        raise HTTPException(status_code=exc.code, detail=f"录失: {err_msg}")
+        raise HTTPException(status_code=exc.code, detail=f"登录失败: {err_msg}")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"斐? {e}")
+        raise HTTPException(status_code=500, detail=f"请求异常: {e}")
 
     # 莶同应峁箃oken / data.token / access_token
     token = (
@@ -1800,9 +1801,9 @@ async def api_sub2api_login(req: Sub2ApiLoginRequest) -> Dict[str, Any]:
         or ""
     )
     if not token:
-        raise HTTPException(status_code=502, detail=f"应未业 token 侄: {str(body)[:300]}")
+        raise HTTPException(status_code=502, detail=f"响应中未获取到 token: {str(body)[:300]}")
 
-    # 远娴?sync_config
+    # 保存到 sync_config
     _sync_config["base_url"] = base_url
     _sync_config["bearer_token"] = token
     _save_sync_config(_sync_config)
@@ -1876,9 +1877,9 @@ async def api_proxy_pool_test(req: ProxyPoolTestRequest) -> Dict[str, Any]:
         "timeout_seconds": 10,
     }
     if not cfg["enabled"]:
-        return {"ok": False, "error": "未"}
+        return {"ok": False, "error": "代理池未启用"}
     if provider == "zenproxy_api" and not cfg["api_key"]:
-        return {"ok": False, "error": "API Key 为"}
+        return {"ok": False, "error": "API Key 为空"}
 
     try:
         from curl_cffi import requests as cffi_req
@@ -2468,15 +2469,15 @@ def _push_account_api(base_url: str, bearer: str, email: str, token_data: Dict[s
 
 @app.post("/api/sync-batch")
 async def api_sync_batch(req: BatchSyncRequest) -> Dict[str, Any]:
-    """通 HTTP API  Token  Sub2Api 平台"""
+    """通过 HTTP API 批量同步 Token 到 Sub2Api 平台"""
     cfg = _sync_config
     base_url = cfg.get("base_url", "").strip()
     bearer   = cfg.get("bearer_token", "").strip()
 
     if not base_url:
-        raise HTTPException(status_code=400, detail=" Sub2Api 平台址")
+        raise HTTPException(status_code=400, detail="缺少 Sub2Api 平台地址")
     if not bearer:
-        raise HTTPException(status_code=400, detail="Bearer Token 为眨卤远录取")
+        raise HTTPException(status_code=400, detail="Bearer Token 为空，请先远程登录获取")
 
     fnames = req.filenames or []
     if not fnames:
@@ -2568,6 +2569,7 @@ async def api_get_pool_config() -> Dict[str, Any]:
 @app.post("/api/pool/config")
 async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
     global _sync_config
+    running_pool_task_synced = False
     old_auto = bool(_sync_config.get("auto_maintain", False))
     old_base = str(_sync_config.get("cpa_base_url", "")).strip()
     old_token = str(_sync_config.get("cpa_token", "")).strip()
@@ -2593,6 +2595,7 @@ async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
     _sync_config["auto_maintain"] = req.auto_maintain
     _sync_config["maintain_interval_minutes"] = max(5, req.maintain_interval_minutes)
     _save_sync_config(_sync_config)
+    running_pool_task_synced = _sync_running_pool_auto_task()
 
     # 停远维
     if req.auto_maintain:
@@ -2623,7 +2626,7 @@ async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
             or old_used != new_used
             or old_interval != new_interval
         )
-        if config_changed:
+        if config_changed and not running_pool_task_synced:
             threading.Thread(target=_try_auto_register, daemon=True).start()
 
     return {"status": "saved"}
@@ -2633,7 +2636,7 @@ async def api_set_pool_config(req: PoolConfigRequest) -> Dict[str, Any]:
 async def api_pool_status() -> Dict[str, Any]:
     pm = _get_pool_maintainer()
     if not pm:
-        return {"configured": False, "error": "CPA 未"}
+        return {"configured": False, "error": "CPA 未配置"}
     status = await run_in_threadpool(pm.get_pool_status)
     status["configured"] = True
     return status
@@ -2643,7 +2646,7 @@ async def api_pool_status() -> Dict[str, Any]:
 async def api_pool_check() -> Dict[str, Any]:
     pm = _get_pool_maintainer()
     if not pm:
-        raise HTTPException(status_code=400, detail="CPA 未")
+        raise HTTPException(status_code=400, detail="CPA 未配置")
     result = await run_in_threadpool(pm.test_connection)
     return result
 
@@ -2652,9 +2655,9 @@ async def api_pool_check() -> Dict[str, Any]:
 async def api_pool_maintain() -> Dict[str, Any]:
     pm = _get_pool_maintainer()
     if not pm:
-        raise HTTPException(status_code=400, detail="CPA 未")
+        raise HTTPException(status_code=400, detail="CPA 未配置")
     if not _pool_maintain_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="维执")
+        raise HTTPException(status_code=409, detail="CPA 维护任务正在运行")
     try:
         result = await run_in_threadpool(pm.probe_and_clean_sync)
         sync_result = _sync_remove_local_tokens_by_cpa_names(result.get("deleted_names") or [])
@@ -2945,6 +2948,97 @@ def _count_local_tokens() -> int:
     return len([f for f in os.listdir(TOKENS_DIR) if f.endswith(".json")])
 
 
+def _sync_running_pool_auto_task() -> bool:
+    ts = datetime.now().strftime("%H:%M:%S")
+    with _state._task_lock:
+        status = _state.status
+        task_source = getattr(_state, "task_source", "manual")
+        old_target = int(getattr(_state, "target_count", 0) or 0)
+        run_success = int(getattr(_state, "run_success_count", 0) or 0)
+
+    if status != "running" or task_source != "pool_auto":
+        return False
+
+    if not _sync_config.get("auto_register"):
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": "[AUTO] 已关闭自动注册，停止当前自动补号任务",
+            "step": "auto_register",
+        })
+        _state.stop_task()
+        return True
+
+    upload_mode = str(_sync_config.get("upload_mode", "snapshot") or "snapshot").strip().lower()
+    if upload_mode not in ("snapshot", "decoupled"):
+        upload_mode = "snapshot"
+
+    cpa_gap = 0
+    sub2api_gap = 0
+    api_error = False
+
+    pm = _get_pool_maintainer()
+    if pm:
+        try:
+            cpa_gap = pm.calculate_gap()
+        except Exception as e:
+            api_error = True
+            _state.broadcast({
+                "ts": ts,
+                "level": "warn",
+                "message": f"[AUTO] 同步运行中任务时查询 CPA 状态失败: {e}",
+                "step": "auto_register",
+            })
+
+    sm = _get_sub2api_maintainer()
+    if sm and _sync_config.get("auto_sync", "true") == "true":
+        try:
+            sub2api_gap = sm.calculate_gap()
+        except Exception as e:
+            api_error = True
+            _state.broadcast({
+                "ts": ts,
+                "level": "warn",
+                "message": f"[AUTO] 同步运行中任务时查询 Sub2Api 状态失败: {e}",
+                "step": "auto_register",
+            })
+
+    gap = (cpa_gap + sub2api_gap) if upload_mode == "snapshot" else max(cpa_gap, sub2api_gap)
+    if api_error and gap <= 0:
+        return True
+
+    if gap <= 0:
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": "[AUTO] 最新配置下已无需补号，停止当前自动注册任务",
+            "step": "auto_register",
+        })
+        _state.stop_task()
+        return True
+
+    new_target = run_success + gap
+    if new_target != old_target:
+        with _state._task_lock:
+            if _state.status != "running" or getattr(_state, "task_source", "manual") != "pool_auto":
+                return True
+            old_target = int(getattr(_state, "target_count", 0) or 0)
+            run_success = int(getattr(_state, "run_success_count", 0) or 0)
+            new_target = run_success + gap
+            _state.target_count = new_target
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": (
+                f"[AUTO] 已按最新配置更新补号目标：CPA 缺口 {cpa_gap}，"
+                f"Sub2Api 缺口 {sub2api_gap}，本轮目标 {old_target} -> {new_target}"
+            ),
+            "step": "auto_register",
+        })
+
+    return True
+
+
 def _sync_running_local_auto_task() -> bool:
     ts = datetime.now().strftime("%H:%M:%S")
     with _state._task_lock:
@@ -3174,7 +3268,7 @@ _sub2api_maintain_lock = threading.Lock()
 async def api_sub2api_pool_status() -> Dict[str, Any]:
     sm = _get_sub2api_maintainer()
     if not sm:
-        return {"configured": False, "error": "Sub2Api 未"}
+        return {"configured": False, "error": "Sub2Api 未配置"}
     status = await run_in_threadpool(sm.get_pool_status)
     status["configured"] = True
     return status
@@ -3184,7 +3278,7 @@ async def api_sub2api_pool_status() -> Dict[str, Any]:
 async def api_sub2api_pool_check() -> Dict[str, Any]:
     sm = _get_sub2api_maintainer()
     if not sm:
-        raise HTTPException(status_code=400, detail="Sub2Api 未")
+        raise HTTPException(status_code=400, detail="Sub2Api 未配置")
     result = await run_in_threadpool(sm.test_connection)
     return result
 
@@ -3193,9 +3287,9 @@ async def api_sub2api_pool_check() -> Dict[str, Any]:
 async def api_sub2api_pool_maintain() -> Dict[str, Any]:
     sm = _get_sub2api_maintainer()
     if not sm:
-        raise HTTPException(status_code=400, detail="Sub2Api 未")
+        raise HTTPException(status_code=400, detail="Sub2Api 未配置")
     if not _sub2api_maintain_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Sub2Api 维执")
+        raise HTTPException(status_code=409, detail="Sub2Api 维护任务正在运行")
     try:
         result = await run_in_threadpool(sm.probe_and_clean_sync)
         _state.broadcast({
