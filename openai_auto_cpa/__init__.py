@@ -1,11 +1,11 @@
 """
-OpenAI Pool Orchestrator
+Openai-Auto-CPA
 ========================
 自动化 OpenAI 账号注册、Token 管理与多平台账号池维护工具。
 """
 
 __version__ = "2.0.0"
-__author__ = "OpenAI Pool Orchestrator Contributors"
+__author__ = "Openai-Auto-CPA Contributors"
 
 import os
 from pathlib import Path

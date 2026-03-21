@@ -1,5 +1,5 @@
 """
-允许通过 python -m openai_pool_orchestrator 启动服务。
+允许通过 python -m openai_auto_cpa 启动服务。
 """
 
 import sys
@@ -13,7 +13,7 @@ from . import __version__
 
 def main():
     print("=" * 50)
-    print(f"  OpenAI Pool Orchestrator v{__version__}")
+    print(f"  Openai-Auto-CPA v{__version__}")
     print("  访问: http://localhost:18421")
     print("  按 Ctrl+C 可退出")
     print("=" * 50)

@@ -1,4 +1,4 @@
-# OpenAI Pool Orchestrator
+# Openai-Auto-CPA
 
 自动化 OpenAI 账号注册、Token 管理与账号池维护的 Web 工具。
 
@@ -23,8 +23,8 @@
 ## 项目结构
 
 ```text
-openai-pool-orchestrator/
-├── openai_pool_orchestrator/
+Openai-Auto-CPA/
+├── openai_auto_cpa/
 │   ├── server.py
 │   ├── register.py
 │   ├── pool_maintainer.py
@@ -104,14 +104,14 @@ python run.py
 或：
 
 ```bash
-python -m openai_pool_orchestrator
+python -m openai_auto_cpa
 ```
 
 或安装命令行入口：
 
 ```bash
 pip install -e .
-openai-pool
+openai-auto-cpa
 ```
 
 ## CLI 模式

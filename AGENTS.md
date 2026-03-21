@@ -1,23 +1,23 @@
 # Repository Guidelines
 
 ## 项目结构与模块组织
-- 核心代码位于 `openai_pool_orchestrator/`。
-- 启动入口：`run.py`（快捷启动）和 `openai_pool_orchestrator/__main__.py`（`python -m` 方式）。
+- 核心代码位于 `openai_auto_cpa/`。
+- 启动入口：`run.py`（快捷启动）和 `openai_auto_cpa/__main__.py`（`python -m` 方式）。
 - `server.py`：FastAPI 服务与 API 路由。
 - `register.py`：注册流程与 CLI 逻辑。
 - `pool_maintainer.py`：账号池维护任务。
 - `mail_providers.py`：邮箱提供商适配层。
-- 前端静态文件在 `openai_pool_orchestrator/static/`。
+- 前端静态文件在 `openai_auto_cpa/static/`。
 - 运行态数据在 `data/`（token、状态、本地配置），视为生成数据，不作为源码维护。
 - 配置模板在 `config/sync_config.example.json`。
 
 ## 构建、测试与开发命令
 - 安装依赖：`pip install -r requirements.txt`
-- 可编辑安装并启用命令行：`pip install -e .`，随后使用 `openai-pool`
+- 可编辑安装并启用命令行：`pip install -e .`，随后使用 `openai-auto-cpa`
 - 启动 Web 服务（推荐）：`python run.py`，访问 `http://localhost:18421`
-- 模块方式启动：`python -m openai_pool_orchestrator`
+- 模块方式启动：`python -m openai_auto_cpa`
 - CLI 单次执行示例：`python run.py --cli --proxy http://127.0.0.1:7897 --once`
-- 基础语法检查：`python -m compileall openai_pool_orchestrator`
+- 基础语法检查：`python -m compileall openai_auto_cpa`
 
 ## 代码风格与命名规范
 - 仅使用 Python 3.10+ 兼容语法。

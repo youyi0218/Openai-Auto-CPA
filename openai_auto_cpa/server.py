@@ -384,7 +384,7 @@ def _save_state(success: int, fail: int) -> None:
 # 应贸始
 # ==========================================
 
-app = FastAPI(title="OpenAI Pool Orchestrator", version=__version__)
+app = FastAPI(title="Openai-Auto-CPA", version=__version__)
 
 BRIDGE_PUBLIC_API_PATHS = {
     "/api/auth/status",

@@ -1,10 +1,10 @@
 services:
-  orchestrator:
+  openai-auto-cpa:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openai-pool-orchestrator:latest
-    container_name: openai-pool-orchestrator
+    image: openai-auto-cpa:latest
+    container_name: openai-auto-cpa
     restart: unless-stopped
     ports:
       - "18421:18421"

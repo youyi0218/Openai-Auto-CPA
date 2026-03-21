@@ -1618,13 +1618,17 @@ def run(
 
         # ------- 步骤9：创建账户 -------
         emitter.info("正在创建账户信息...", step="create_account")
+        create_account_headers = {
+            "referer": "https://auth.openai.com/about-you",
+            "accept": "application/json",
+            "content-type": "application/json",
+        }
+        create_account_sentinel = _fetch_sentinel(did, "authorize_continue", "create_account")
+        if create_account_sentinel:
+            create_account_headers["openai-sentinel-token"] = create_account_sentinel
         create_account_resp = _session_post(
             "https://auth.openai.com/api/accounts/create_account",
-            headers={
-                "referer": "https://auth.openai.com/about-you",
-                "accept": "application/json",
-                "content-type": "application/json",
-            },
+            headers=create_account_headers,
             json={"name": "Neo", "birthdate": "2000-02-20"},
         )
         create_account_status = create_account_resp.status_code

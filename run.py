@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-快速启动脚本 - OpenAI Pool Orchestrator
+快速启动脚本 - Openai-Auto-CPA
 
 用法:
     python run.py              # 启动 Web 服务
@@ -19,11 +19,11 @@ def main():
     if "--cli" in sys.argv:
         # CLI 模式：直接调用注册脚本
         sys.argv.remove("--cli")
-        from openai_pool_orchestrator.register import main as cli_main
+        from openai_auto_cpa.register import main as cli_main
         cli_main()
     else:
         # Web 模式：启动 FastAPI 服务
-        from openai_pool_orchestrator.__main__ import main as web_main
+        from openai_auto_cpa.__main__ import main as web_main
         web_main()
 
 
