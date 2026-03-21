@@ -459,6 +459,7 @@ class TaskState:
         self.multithread: bool = False
         self.upload_mode: str = "snapshot"
         self.target_count: int = 0
+        self.task_source: str = "manual"
         # 前诩史奂 success/fail 耄?
         self.run_success_count: int = 0
         self.run_fail_count: int = 0
@@ -528,6 +529,7 @@ class TaskState:
         target_count: int = 0,
         cpa_target_count: Optional[int] = None,
         sub2api_target_count: Optional[int] = None,
+        task_source: str = "manual",
     ) -> None:
         cpa_target = None if cpa_target_count is None else max(0, int(cpa_target_count))
         sub2api_target = None if sub2api_target_count is None else max(0, int(sub2api_target_count))
@@ -546,6 +548,7 @@ class TaskState:
             self.multithread = multithread
             self.upload_mode = upload_mode
             self.target_count = max(0, target_count)
+            self.task_source = str(task_source or "manual").strip().lower() or "manual"
             self.run_success_count = 0
             self.run_fail_count = 0
             self.platform_success_count = {name: 0 for name in UPLOAD_PLATFORMS}
@@ -1048,6 +1051,8 @@ class TaskState:
                 self.status = "idle"
                 self._worker_threads.clear()
                 self.worker_count = 0
+                self.target_count = 0
+                self.task_source = "manual"
 
         for wid in range(1, n + 1):
             t = threading.Thread(target=_worker_loop, args=(wid,), daemon=True)
@@ -1276,7 +1281,7 @@ def _render_management_html() -> HTMLResponse:
 @app.post("/api/start")
 async def api_start(req: StartRequest) -> Dict[str, Any]:
     try:
-        _state.start_task(req.proxy, req.multithread, req.thread_count)
+        _state.start_task(req.proxy, req.multithread, req.thread_count, task_source="manual")
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"status": "started", "proxy": req.proxy, "workers": _state.worker_count}
@@ -1295,6 +1300,7 @@ async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
     local_related_changed = False
     desired_changed = False
     auto_register_changed = False
+    running_local_task_synced = False
 
     if req.proxy is not None:
         _sync_config["proxy"] = req.proxy.strip()
@@ -1322,11 +1328,17 @@ async def api_save_proxy(req: ProxySaveRequest) -> Dict[str, str]:
         local_related_changed = True
 
     _save_sync_config(_sync_config)
+    if desired_changed or auto_register_changed:
+        running_local_task_synced = _sync_running_local_auto_task()
     if local_related_changed:
         _stop_local_auto_maintain()
         if _sync_config.get("local_auto_maintain"):
             _start_local_auto_maintain()
-    if (desired_changed or auto_register_changed) and _sync_config.get("local_auto_maintain"):
+    if (
+        (desired_changed or auto_register_changed)
+        and _sync_config.get("local_auto_maintain")
+        and not running_local_task_synced
+    ):
         _try_local_auto_register()
     return {"status": "saved"}
 
@@ -1615,6 +1627,11 @@ def _verify_sub2api_login(base_url: str, email: str, password: str) -> Dict[str,
 async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
     """同茫证录凭荩"""
     global _sync_config
+    old_auto_register = bool(_sync_config.get("auto_register", False))
+    try:
+        old_desired_token_count = int(_sync_config.get("desired_token_count", 0) or 0)
+    except (TypeError, ValueError):
+        old_desired_token_count = 0
     new_base_url = req.base_url.strip()
     if new_base_url and not new_base_url.startswith(("http://", "https://")):
         new_base_url = "https://" + new_base_url
@@ -1662,6 +1679,11 @@ async def api_set_sync_config(req: SyncConfigRequest) -> Dict[str, Any]:
     _save_sync_config(_sync_config)
 
     # 停确叱顺
+    desired_changed = max(0, int(req.desired_token_count)) != old_desired_token_count
+    auto_register_changed = bool(req.auto_register) != old_auto_register
+    if desired_changed or auto_register_changed:
+        _sync_running_local_auto_task()
+
     _stop_sub2api_auto_maintain()
     if req.sub2api_auto_maintain:
         _start_sub2api_auto_maintain()
@@ -2899,6 +2921,7 @@ def _try_auto_register() -> None:
             target_count=gap,
             cpa_target_count=cpa_gap if pm else 0,
             sub2api_target_count=sub2api_gap if sm and _sync_config.get("auto_sync", "true") == "true" else 0,
+            task_source="pool_auto",
         )
         _state.broadcast({
             "ts": ts, "level": "success",
@@ -2920,6 +2943,62 @@ def _count_local_tokens() -> int:
     if not os.path.isdir(TOKENS_DIR):
         return 0
     return len([f for f in os.listdir(TOKENS_DIR) if f.endswith(".json")])
+
+
+def _sync_running_local_auto_task() -> bool:
+    ts = datetime.now().strftime("%H:%M:%S")
+    with _state._task_lock:
+        status = _state.status
+        task_source = getattr(_state, "task_source", "manual")
+        old_target = int(getattr(_state, "target_count", 0) or 0)
+        run_success = int(getattr(_state, "run_success_count", 0) or 0)
+
+    if status != "running" or task_source != "local_auto":
+        return False
+
+    if not _sync_config.get("auto_register"):
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": "[LOCAL] 已关闭自动补号，停止当前本地自动注册任务",
+            "step": "local_auto",
+        })
+        _state.stop_task()
+        return True
+
+    expected = max(0, int(_sync_config.get("desired_token_count", 0) or 0))
+    current_count = _count_local_tokens()
+    remaining_gap = max(0, expected - int(current_count))
+    new_target = run_success + remaining_gap
+
+    if new_target != old_target:
+        with _state._task_lock:
+            if _state.status != "running" or getattr(_state, "task_source", "manual") != "local_auto":
+                return True
+            old_target = int(getattr(_state, "target_count", 0) or 0)
+            run_success = int(getattr(_state, "run_success_count", 0) or 0)
+            new_target = run_success + remaining_gap
+            _state.target_count = new_target
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": (
+                f"[LOCAL] 已按最新配置更新补号目标：当前 {current_count}/{expected}，"
+                f"本轮目标 {old_target} -> {new_target}"
+            ),
+            "step": "local_auto",
+        })
+
+    if remaining_gap <= 0:
+        _state.broadcast({
+            "ts": ts,
+            "level": "info",
+            "message": f"[LOCAL] 当前账号数已满足最新目标 {current_count}/{expected}，停止当前本地自动注册任务",
+            "step": "local_auto",
+        })
+        _state.stop_task()
+
+    return True
 
 
 def _try_local_auto_register(current_count: Optional[int] = None) -> None:
@@ -2958,7 +3037,7 @@ def _try_local_auto_register(current_count: Optional[int] = None) -> None:
     multithread = bool(_sync_config.get("multithread", False))
     thread_count = int(_sync_config.get("thread_count", 3) or 3)
     try:
-        _state.start_task(proxy, multithread, thread_count, target_count=gap)
+        _state.start_task(proxy, multithread, thread_count, target_count=gap, task_source="local_auto")
         _state.broadcast({
             "ts": ts,
             "level": "success",
