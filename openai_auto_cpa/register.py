@@ -1623,9 +1623,13 @@ def run(
             "accept": "application/json",
             "content-type": "application/json",
         }
+        emitter.info("create_account 请求前开始获取 Sentinel Token...", step="create_account")
         create_account_sentinel = _fetch_sentinel(did, "authorize_continue", "create_account")
-        if create_account_sentinel:
-            create_account_headers["openai-sentinel-token"] = create_account_sentinel
+        if not create_account_sentinel:
+            emitter.error("create_account 前未获取到 Sentinel Token，已中止请求", step="create_account")
+            return None
+        create_account_headers["openai-sentinel-token"] = create_account_sentinel
+        emitter.info("create_account 已附加 openai-sentinel-token 请求头", step="create_account")
         create_account_resp = _session_post(
             "https://auth.openai.com/api/accounts/create_account",
             headers=create_account_headers,
